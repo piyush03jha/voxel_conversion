@@ -2,7 +2,7 @@ import { Controller, Get } from '@nestjs/common'
 import { ACCEPTED_FORMATS, MAX_UPLOAD_BYTES, getSupportedOutputs } from '../../../packages/shared/src/compatibility'
 
 import { QueueService } from './conversion/queue.service'
-import { isWorkerRoute } from '../../../packages/shared/src/jobs'
+import { isWorkerRoute, COMPRESSION_LEVELS } from '../../../packages/shared/src/jobs'
 
 @Controller('formats')
 export class FormatsController {
@@ -13,6 +13,8 @@ export class FormatsController {
     return {
       maxUploadBytes: MAX_UPLOAD_BYTES,
       conversionAvailable,
+      compressionLevels: [...COMPRESSION_LEVELS],
+      customColorAvailable: false,
       formats: ACCEPTED_FORMATS.map((input) => ({ input, plannedOutputs: getSupportedOutputs(input), enabledOutputs: conversionAvailable ? getSupportedOutputs(input).filter((output) => isWorkerRoute(input, output)) : [] })),
     }
   }

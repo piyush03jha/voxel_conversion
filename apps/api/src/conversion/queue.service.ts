@@ -112,7 +112,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   async create(body: unknown) {
     if (!this.config.acceptJobs || !this.storage.configured) throw new ServiceUnavailableException('Job submission is disabled')
     const request = validateUpload(body)
-    if (!isWorkerRoute(request.inputFormat, request.outputFormat) || request.compression !== 'None' || request.color !== null) throw new BadRequestException('Phase 3 supports STL to GLB without compression or custom color')
+    if (!isWorkerRoute(request.inputFormat, request.outputFormat) || request.color !== null) throw new BadRequestException('Only existing ADVFX inputs to GLB are supported; custom color is paused')
     if (!this.config.queueTestMode && await this.workerCount() < 1) throw new ServiceUnavailableException('No conversion worker is available')
     const { redis } = this.ready()
     const count = Number(await redis.eval(RATE, 1, prefix + 'create-rate'))
@@ -152,7 +152,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       const existing = await queue.getJob(id)
       if (existing) return { id, status: await existing.getState() }
       if (!this.config.acceptJobs) throw new ServiceUnavailableException('Job submission is disabled')
-      if (!isWorkerRoute(s.inputFormat, s.outputFormat) || s.compression !== 'None' || s.color !== null) throw new BadRequestException('Conversion route not enabled')
+      if (!isWorkerRoute(s.inputFormat, s.outputFormat) || s.color !== null) throw new BadRequestException('Conversion route not enabled')
       if (!this.config.queueTestMode && await this.workerCount() < 1) throw new ServiceUnavailableException('No conversion worker is available')
       if (Date.now() >= s.uploadUntil) throw new ConflictException('Upload session expired')
       const object = await this.storage.head(s.inputKey)
@@ -193,7 +193,8 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       if (index >= 0) position = index + 1
     }
     const outputBytes = state === 'completed' && Number.isSafeInteger(job.returnvalue?.outputBytes) && job.returnvalue.outputBytes > 0 ? job.returnvalue.outputBytes : null
-    return { id, status: state, position, etaSeconds: null, error: state === 'failed' ? 'Conversion failed. Check the STL file or try a less complex model.' : null, progress: typeof job.progress === 'number' ? job.progress : null, originalBytes: s.originalBytes, outputBytes, reductionPercent: outputBytes === null ? null : Math.round((1 - outputBytes / s.originalBytes) * 10000) / 100 }
+    const convertedBytes = state === 'completed' && Number.isSafeInteger(job.returnvalue?.convertedBytes) && job.returnvalue.convertedBytes > 0 ? job.returnvalue.convertedBytes : null
+    return { id, status: state, position, etaSeconds: null, convertedBytes, compressionApplied: state === 'completed' ? job.returnvalue?.compressionApplied ?? false : null, warning: state === 'completed' ? job.returnvalue?.warning ?? null : null, compressionReductionPercent: outputBytes !== null && convertedBytes !== null ? Math.round((1 - outputBytes / convertedBytes) * 10000) / 100 : null, error: state === 'failed' ? 'Conversion failed. Check the input file, missing dependencies or model complexity.' : null, progress: typeof job.progress === 'number' ? job.progress : null, originalBytes: s.originalBytes, outputBytes, reductionPercent: outputBytes === null ? null : Math.round((1 - outputBytes / s.originalBytes) * 10000) / 100 }
   }
   async cancel(id: string, authorization?: string) {
     await this.authorized(id, authorization)

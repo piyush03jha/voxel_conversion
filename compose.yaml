@@ -40,6 +40,7 @@ services:
       REDIS_URL: redis://redis:6379
       STORAGE_ENDPOINT: http://minio:9000
       WORKER_STL_ENGINE: native
+      WORKER_SANDBOX: trusted-local
     depends_on:
       redis:
         condition: service_healthy

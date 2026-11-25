@@ -8,21 +8,22 @@ import { QUEUE_NAME, WORKER_HEARTBEATS } from '../../../packages/shared/src/jobs
 import type { ConversionJobData, ConversionJobResult } from '../../../packages/shared/src/jobs'
 import { workerConfig } from './config'
 import { checkJob } from './contract'
-import { runConverter } from './process'
-import { storageClient, checkStorage, downloadInput, verifyGlb, uploadOutput } from './storage'
+import { runConverter, optimizeGlb, probeSandbox } from './process'
+import { storageClient, checkStorage, downloadInput, uploadOutput } from './storage'
 
 async function main() {
   const config = workerConfig()
   if (process.platform !== 'linux') throw new Error('Use a Linux or Docker worker')
   await access(config.workRoot, constants.W_OK)
-  await access(join(config.scriptsDir, 'validate-stl.py'), constants.R_OK)
-  await access(join(config.scriptsDir, config.engine === 'native' ? 'dense-mesh-to-glb.py' : 'blender-convert.py'), constants.R_OK)
+  for (const script of ['validate-stl.py', 'validate-input.py', 'dense-mesh-to-glb.py', 'threemf-to-glb.py', 'blender-convert.py']) await access(join(config.scriptsDir, script), constants.R_OK)
   // Verify executable availability before announcing a worker.
   const { spawnSync } = await import('node:child_process')
-  for (const executable of ['prlimit', config.python, ...(config.engine === 'blender' ? [config.blender] : [])]) {
+  for (const executable of ['prlimit', config.python, config.blender, config.optimizer, ...(config.sandbox === 'bwrap' ? ['bwrap'] : [])]) {
     const probe = spawnSync(executable, ['--version'], { timeout: 10000, stdio: 'ignore' })
     if (probe.status !== 0) throw new Error('Required converter executable unavailable')
   }
+  const probeDir = await mkdtemp(join(config.workRoot, 'formshift-probe-'))
+  try { await probeSandbox(config, probeDir) } finally { await rm(probeDir, { recursive: true, force: true }) }
   const storage = storageClient(config)
   await checkStorage(storage, config.bucket)
   const id = randomUUID()
@@ -57,21 +58,22 @@ async function main() {
     try {
       await ownLock()
       dir = await mkdtemp(join(config.workRoot, 'formshift-job-'))
-      const input = join(dir, 'input.stl'), output = join(dir, 'output.glb')
+      const input = join(dir, 'input.' + job.data.inputFormat.toLowerCase()), output = join(dir, 'output.glb')
       await bounded(job.updateProgress(5))
       await downloadInput(storage, config, job.data, input, controller.signal)
       await bounded(job.updateProgress(25))
-      await runConverter(config, dir, input, output, controller.signal)
-      const outputBytes = await verifyGlb(output, config.maxOutputBytes)
+      const converted = await runConverter(config, dir, input, output, job.data.inputFormat, controller.signal)
+      await bounded(job.updateProgress(60))
+      const result = await optimizeGlb(config, dir, converted, job.data.compression, controller.signal)
       controller.signal.throwIfAborted()
       await bounded(job.updateProgress(85))
       await ownLock()
-      await uploadOutput(storage, config, job.data, output, outputBytes, controller.signal)
+      await uploadOutput(storage, config, job.data, result.path, result.outputBytes, controller.signal)
       controller.signal.throwIfAborted()
       await ownLock()
       await bounded(job.updateProgress(100))
       controller.signal.throwIfAborted()
-      return { outputBytes }
+      return { outputBytes: result.outputBytes, convertedBytes: result.convertedBytes, compressionApplied: result.compressionApplied, warning: result.warning }
     } catch {
       // Never persist paths, signed URLs, credentials or parser output in BullMQ failures.
       throw new Error('CONVERSION_FAILED')
@@ -118,7 +120,7 @@ async function main() {
   interval = setInterval(() => {
     if (!heartbeatTask && !closing) heartbeatTask = heartbeat().catch(() => { active?.abort(); console.error('Heartbeat failed') }).finally(() => { heartbeatTask = undefined })
   }, 10000)
-  console.log('Worker ready: STL → GLB, concurrency 1')
+  console.log('Worker ready: existing ADVFX inputs → GLB, concurrency 1')
   await worker.run()
 }
 void main().catch(() => { console.error('Worker startup failed; check configuration, Redis, storage, and converter tools'); process.exit(1) })

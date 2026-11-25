@@ -6,6 +6,7 @@ export function intEnv(name: string, fallback: number, min: number, max: number)
 }
 export const settings = () => {
   if (process.env.NODE_ENV === 'production' && process.env.QUEUE_TEST_MODE === 'true') throw new Error('QUEUE_TEST_MODE is prohibited in production')
+  if (process.env.NODE_ENV === 'production' && process.env.QUEUE_ACCEPT_JOBS === 'true' && process.env.PUBLIC_CONVERSION_APPROVED !== 'true') throw new Error('Public conversion requires explicit deployment approval')
   return ({
   queueTestMode: process.env.QUEUE_TEST_MODE === 'true',
   acceptJobs: process.env.QUEUE_ACCEPT_JOBS === 'true',

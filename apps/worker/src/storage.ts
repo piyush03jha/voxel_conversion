@@ -30,7 +30,7 @@ export async function downloadInput(client: S3Client, config: WorkerConfig, data
   await pipeline(result.Body, limit, createWriteStream(path, { flags: 'wx', mode: 0o600 }), { signal })
   if (bytes !== data.originalBytes) throw new Error('INPUT_SIZE_MISMATCH')
 }
-export async function verifyGlb(path: string, maxBytes: number) {
+export async function readGlbInfo(path: string, maxBytes: number) {
   const info = await stat(path)
   if (!info.isFile() || info.size < 28 || info.size > maxBytes) throw new Error('INVALID_OUTPUT')
   const handle = await open(path, 'r')
@@ -49,8 +49,12 @@ export async function verifyGlb(path: string, maxBytes: number) {
     if ((await handle.read(bin, 0, 8, 20 + jsonLength)).bytesRead !== 8 || bin.readUInt32LE(4) !== 0x004e4942 || bin.readUInt32LE(0) % 4 || 28 + jsonLength + bin.readUInt32LE(0) !== info.size) throw new Error('INVALID_GLB_BIN')
     const declared = doc.buffers[0].byteLength
     if (!Number.isSafeInteger(declared) || declared < 1 || declared > bin.readUInt32LE(0) || bin.readUInt32LE(0) - declared > 3) throw new Error('INVALID_GLB_BIN')
-    return info.size
+    const animated = !!doc.animations?.length || !!doc.skins?.length || doc.meshes.some((mesh: { primitives?: Array<{ targets?: unknown[] }> }) => mesh.primitives?.some((primitive) => !!primitive.targets?.length))
+    return { bytes: info.size, animated }
   } finally { await handle.close() }
+}
+export async function verifyGlb(path: string, maxBytes: number) {
+  return (await readGlbInfo(path, maxBytes)).bytes
 }
 export async function uploadOutput(client: S3Client, config: WorkerConfig, data: ConversionJobData, path: string, bytes: number, signal: AbortSignal) {
   const body = createReadStream(path)
