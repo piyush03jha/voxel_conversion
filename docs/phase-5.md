@@ -1,5 +1,7 @@
 # Phase 5 — Compression (custom color paused)
 
+Update: see [Phase 4A](phase-4a.md) for the new STL/OBJ/PLY and 3MF compressors and output-specific availability. The GLB details below remain applicable.
+
 The existing ADVFX glTF Transform optimization logic is reused on the canonical GLB. There is no additional importer/exporter development. GLB → GLB allows same-format compression; other inputs convert to GLB first.
 
 | Level | Optimization |

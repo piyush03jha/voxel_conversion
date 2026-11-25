@@ -1,5 +1,7 @@
 # Phase 3 — Existing ADVFX conversion engine
 
+Update: the GLB-only milestone below is superseded by the selected-output handlers in [Phase 4A](phase-4a.md). The existing GLB route and setup remain applicable.
+
 Scope: reuse the existing 15 input formats only, with GLB as the sole output. Additional import/export development (Phase 4) is deferred until the client requests it. Phase 5 adds compression; custom color is paused.
 
 ## Existing routes
@@ -26,7 +28,7 @@ Node 22.12+, Docker Compose, Linux.
 8. Test each existing format using SMOKE_MODEL_PATH=/absolute/path/to/fixture npm run smoke:conversion. Use fixtures with supported geometry and no external dependencies. See phase-5.md for compression.
 9. Stop worker and reset QUEUE_ACCEPT_JOBS=false before public use.
 
-The worker image includes the same Blender 4.5.14, 3MF add-on commit and glTF Transform 4.5.1 versions as ADVFX. For a native local worker, install the equivalent tools and run npm run dev:worker. The worker process is separate from NestJS.
+The worker image also includes librsvg for vector export. The worker image includes the same Blender 4.5.14, 3MF add-on commit and glTF Transform 4.5.1 versions as ADVFX. For a native local worker, install the equivalent tools and run npm run dev:worker. The worker process is separate from NestJS.
 
 ## Resource and security boundaries
 

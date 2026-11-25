@@ -147,3 +147,5 @@
 .color-toggle input { accent-color: var(--accent); }
 .color-control input:disabled { opacity: .55; cursor: not-allowed; }
 .format-value select { background: #161e1d; color: #d9e3de; border: 0; font: inherit; max-width: 100%; }
+
+.compression-option:disabled { opacity: .4; cursor: not-allowed; }

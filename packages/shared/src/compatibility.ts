@@ -39,8 +39,8 @@ export function getOutputWarning(output: ModelFormat): string | null {
   if (output === 'OBJ') return 'Single-file OBJ geometry, UVs and normals; no MTL or textures. Animation is not preserved.'
   if (output === 'STL' || output === 'PLY' || output === '3MF') return 'Static mesh export; animation and most materials are not preserved.'
   if (output === 'BVH') return 'Requires exactly one compatible armature; exports skeleton motion only.'
-  if (output === 'SVG' || output === 'PDF') return '2D document conversion only; PDF to SVG uses the first page.'
-  if (['USD', 'USDA', 'USDC', 'USDZ'].includes(output)) return 'Single-file USD export; external textures and unsupported scene features may be omitted.'
+  if (output === 'SVG' || output === 'PDF') return '2D document conversion only; PDF to SVG uses the first page. Same-format documents are returned unchanged, not sanitized.'
+  if (['USD', 'USDA', 'USDC', 'USDZ'].includes(output)) return 'Single-file USD export; materials and external textures are omitted, and unsupported scene features may be lost.'
   if (output === 'ABC') return 'Baked geometry/cache export; materials and rig structure may be lost.'
   return null
 }

@@ -1,6 +1,6 @@
 # Formshift — 3D File Workshop
 
-Standalone 3D file converter. Phase 3 integrates the existing ADVFX import routes to GLB. Phase 5 adds four compression presets and same-format GLB optimization. Additional formats and custom color are deferred. Public job submission remains disabled pending verification.
+Standalone 3D file converter. Phase 3 integrates existing ADVFX imports. Phase 4A adds compatible selected-format exporters for the original 15 formats. Phase 5 adds format-specific compression. New formats and custom color are deferred. Public job submission remains disabled pending verification.
 
 ## Layout
 
@@ -37,4 +37,4 @@ npm run build
 npm run lint
 ```
 
-The API lockfile must be refreshed by npm run setup and committed before deploying. The existing frontend lockfile is unchanged. See docs/phase-2.md for exact storage setup and limitations. The existing 15 inputs to GLB and compression presets are implemented in code; runtime verification is pending. Additional imports/exports, custom color, real ETA and frontend submission remain deferred. Public admission requires explicit approval and a working sandbox. See docs/phase-3.md and docs/phase-5.md.
+The API lockfile must be refreshed by npm run setup and committed before deploying. The existing frontend lockfile is unchanged. See docs/phase-2.md for exact storage setup and limitations. The original 15 formats are represented as input/output targets through 188 candidate pairs; runtime verification is pending. See docs/phase-4a.md for limitations and per-format smoke testing. New formats, custom color, real ETA and frontend submission remain deferred. Public admission requires explicit approval and a working sandbox. See docs/phase-3.md and docs/phase-5.md.
