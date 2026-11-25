@@ -13,7 +13,7 @@ class PreviewBoundary extends Component<{ children: ReactNode }, { failed: boole
   }
 }
 
-export default function SampleViewport({ file, color }: { file: File | null; color?: string }) {
+export default function SampleViewport({ file }: { file: File | null }) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const [shouldLoadScene, setShouldLoadScene] = useState(false)
 
@@ -29,11 +29,11 @@ export default function SampleViewport({ file, color }: { file: File | null; col
   }, [])
 
   return (
-    <div ref={viewportRef} className="preview-canvas" aria-label={file ? 'Local STL preview' : 'Interactive sample 3D scene'}>
+    <div ref={viewportRef} className="preview-canvas" aria-label={file ? 'Local geometry preview' : 'Interactive sample 3D scene'}>
       {shouldLoadScene ? (
         <PreviewBoundary key={file ? file.name + file.size + file.lastModified : 'sample'}>
           <Suspense fallback={<div className="scene-loading">Loading 3D scene…</div>}>
-            <ThreeScene file={file} color={color} />
+            <ThreeScene file={file} />
           </Suspense>
         </PreviewBoundary>
       ) : <div className="scene-loading">3D scene loads when you reach the preview</div>}

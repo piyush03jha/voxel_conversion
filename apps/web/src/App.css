@@ -147,3 +147,25 @@
 .color-toggle input { accent-color: var(--accent); }
 .color-control input:disabled { opacity: .55; cursor: not-allowed; }
 .format-value select { background: #161e1d; color: #d9e3de; border: 0; font: inherit; max-width: 100%; }
+
+.compression-option:disabled { opacity: .4; cursor: not-allowed; }
+
+.convert-button:not(:disabled) { cursor: pointer; opacity: 1; }
+.convert-button:not(:disabled):hover { border-color: var(--accent); }
+.job-action { display: block; width: 100%; margin-top: 8px; border: 1px solid #40524a; border-radius: 4px; padding: 10px; background: #1c2924; color: #cbd6d0; font-size: 11px; cursor: pointer; }
+.job-action:disabled { opacity: .5; cursor: not-allowed; }
+.download-action { background: #274639; color: var(--accent); }
+.job-progress { display: block; width: 100%; height: 7px; margin: 8px 0; accent-color: var(--accent); }
+.job-warning { color: #d6b97f !important; }
+
+.preview-message { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 32px; }
+.preview-switch { position: absolute; z-index: 3; top: 12px; right: 12px; display: flex; gap: 4px; }
+.preview-switch button { background: #172420; color: #a8b9b0; padding: 6px 10px; border: 1px solid #35443d; border-radius: 4px; font-size: 11px; cursor: pointer; }
+.preview-switch button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.preview-switch button:disabled { opacity: .45; cursor: not-allowed; }
+
+.preview-tools { position: absolute; bottom: 38px; left: 12px; right: 12px; z-index: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; pointer-events: none; }
+.preview-tools button { pointer-events: auto; padding: 7px 10px; background: #172420; color: var(--accent); border: 1px solid #40524a; border-radius: 4px; cursor: pointer; font-size: 11px; }
+.preview-tools button:disabled { opacity: .5; cursor: not-allowed; }
+.preview-tools small { color: #a8b9b0; }
+.document-preview { position: absolute; inset: 40px 24px 55px; width: calc(100% - 48px); height: calc(100% - 95px); object-fit: contain; background: #fff; }

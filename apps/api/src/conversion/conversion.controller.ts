@@ -21,6 +21,10 @@ export class ConversionController {
   @Header('Cache-Control', 'no-store')
   cancel(@Param('id') id: string, @Headers('authorization') auth?: string) { return this.jobs.cancel(id, auth) }
 
+  @Post(':id/preview')
+  @Header('Cache-Control', 'no-store')
+  preview(@Param('id') id: string, @Headers('authorization') auth?: string) { return this.jobs.previewOutput(id, auth) }
+
   @Get(':id/download')
   @Header('Cache-Control', 'no-store')
   download(@Param('id') id: string, @Headers('authorization') auth?: string) { return this.jobs.download(id, auth) }

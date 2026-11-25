@@ -1,6 +1,6 @@
 # Formshift — 3D File Workshop
 
-Standalone 3D file converter. Phase 3 integrates the existing ADVFX import routes to GLB. Phase 5 adds four compression presets and same-format GLB optimization. Additional formats and custom color are deferred. Public job submission remains disabled pending verification.
+Standalone 3D file converter. Phase 3 integrates existing ADVFX imports. Phase 4A adds compatible selected-format exporters for the original 15 formats. Phase 5 adds format-specific compression. New formats and custom color are deferred. Public job submission remains disabled pending verification.
 
 ## Layout
 
@@ -37,4 +37,12 @@ npm run build
 npm run lint
 ```
 
-The API lockfile must be refreshed by npm run setup and committed before deploying. The existing frontend lockfile is unchanged. See docs/phase-2.md for exact storage setup and limitations. The existing 15 inputs to GLB and compression presets are implemented in code; runtime verification is pending. Additional imports/exports, custom color, real ETA and frontend submission remain deferred. Public admission requires explicit approval and a working sandbox. See docs/phase-3.md and docs/phase-5.md.
+The API lockfile must be refreshed by npm run setup and committed before deploying. The existing frontend lockfile is unchanged. See docs/phase-2.md for exact storage setup and limitations. The original 15 formats are represented as input/output targets through 188 candidate pairs; runtime verification is pending. See docs/phase-4a.md for limitations and per-format smoke testing. New formats, custom color, real ETA and frontend submission remain deferred. Public admission requires explicit approval and a working sandbox. See docs/phase-3.md and docs/phase-5.md.
+
+## Hybrid browser-first processing
+
+See [browser-first routing and frontend integration](docs/browser-first.md). Eligible geometry and glTF repacking jobs execute locally; other conversions use the server. Run npm run test:browser for the codec regression suite. Runtime verification remains required.
+
+Phase 6 UI, bounded model preview, measured queue wait estimation, and resumable status tracking are documented in [Phase 6](docs/phase-6.md). Server output preview requires GET CORS on temporary storage. Runtime verification remains pending.
+
+All 15 formats have preview routes; see [all-format preview](docs/preview-all-formats.md). Server previews are optional, bounded and separate from conversion results.

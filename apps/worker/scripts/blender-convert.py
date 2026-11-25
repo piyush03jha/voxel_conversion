@@ -15,6 +15,10 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--input", required=True)
 parser.add_argument("--output", required=True)
 parser.add_argument("--ext", required=True)
+parser.add_argument("--target", default="GLB")
+parser.add_argument("--compression", default="None")
+parser.add_argument("--candidate")
+parser.add_argument("--preview", action="store_true")
 args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:])
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -483,26 +487,43 @@ try:
         raise RuntimeError("Imported objects could not be selected for export")
     bpy.context.view_layer.objects.active = bpy.context.selected_objects[0]
 
-    bpy.ops.export_scene.gltf(
-        filepath=args.output,
-        export_format="GLB",
-        export_yup=True,
-        export_animations=True,
-        export_materials="EXPORT",
-        # Preserve vertex-painted/scan colors even when the imported OBJ has
-        # no material node using the color attribute.
-        export_vertex_color="ACTIVE",
-        export_all_vertex_colors=True,
-        export_active_vertex_color_when_no_material=True,
-        use_selection=True,
-        # Alembic imports drive geometry through a mesh-cache modifier; apply
-        # it so the exported mesh is the cache's first frame, not the empty
-        # base mesh. Not applied for other formats (keeps skinning/shape keys).
-        **({"export_apply": True} if args.ext.lower() == ".abc" else {}),
-    )
+    if args.preview:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from preview_mesh import write_preview
+        write_preview(args.output)
+    elif args.target == "GLB":
+        bpy.ops.export_scene.gltf(
+            filepath=args.output,
+            export_format="GLB",
+            export_yup=True,
+            export_animations=True,
+            export_materials="EXPORT",
+            # Preserve vertex-painted/scan colors even when the imported OBJ has
+            # no material node using the color attribute.
+            export_vertex_color="ACTIVE",
+            export_all_vertex_colors=True,
+            export_active_vertex_color_when_no_material=True,
+            use_selection=True,
+            # Alembic imports drive geometry through a mesh-cache modifier; apply
+            # it so the exported mesh is the cache's first frame, not the empty
+            # base mesh. Not applied for other formats (keeps skinning/shape keys).
+            **({"export_apply": True} if args.ext.lower() == ".abc" else {}),
+        )
+    else:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from export_handlers import export_scene, compress_scene
+        export_scene(args.target, args.output, "None")
+        if args.candidate and args.compression != "None":
+            try:
+                if args.target == "3MF" or compress_scene(args.compression):
+                    export_scene(args.target, args.candidate, args.compression)
+            except Exception:
+                # Baseline is already complete. Never publish a partial candidate.
+                if os.path.exists(args.candidate):
+                    os.remove(args.candidate)
+    if not os.path.isfile(args.output) or os.path.getsize(args.output) == 0:
+        raise RuntimeError("Exporter finished without writing the requested file")
 
-    if not os.path.isfile(args.output) or os.path.getsize(args.output) < 20:
-        raise RuntimeError("Blender finished without writing a GLB file")
 finally:
     if generated_svg:
         try:

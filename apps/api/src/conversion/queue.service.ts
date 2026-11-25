@@ -3,7 +3,10 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import Redis from 'ioredis'
 import { Queue } from 'bullmq'
 import type { ConversionJobData, ConversionJobResult } from '../../../../packages/shared/src/jobs'
+import { getCompressionLevels } from '../../../../packages/shared/src/compatibility'
 import { QUEUE_NAME, WORKER_HEARTBEATS, isWorkerRoute } from '../../../../packages/shared/src/jobs'
+import { jobOutputKey, previewKind, PREVIEW_MAX_BYTES } from '../../../../packages/shared/src/preview'
+import { estimateWaitSeconds } from './queue-estimate'
 import { settings } from './config'
 import { StorageService, UPLOAD_HEADERS } from './storage.service'
 import { tokenHash, validateUpload } from './validation'
@@ -51,6 +54,8 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   private timer?: ReturnType<typeof setInterval>
   private sweepTask?: Promise<void>
   private closing = false
+  private estimateCache?: { at: number; samples: number[]; activeElapsed: number[]; workers: number }
+  private estimateTask?: Promise<void>
   constructor(private readonly storage: StorageService) {}
 
   async onModuleInit() {
@@ -112,7 +117,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   async create(body: unknown) {
     if (!this.config.acceptJobs || !this.storage.configured) throw new ServiceUnavailableException('Job submission is disabled')
     const request = validateUpload(body)
-    if (!isWorkerRoute(request.inputFormat, request.outputFormat) || request.color !== null) throw new BadRequestException('Only existing ADVFX inputs to GLB are supported; custom color is paused')
+    if (!isWorkerRoute(request.inputFormat, request.outputFormat) || request.color !== null) throw new BadRequestException('Unsupported conversion pair; custom color is paused')
     if (!this.config.queueTestMode && await this.workerCount() < 1) throw new ServiceUnavailableException('No conversion worker is available')
     const { redis } = this.ready()
     const count = Number(await redis.eval(RATE, 1, prefix + 'create-rate'))
@@ -123,7 +128,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const session: Session = {
       ...request, id, hash: tokenHash(token),
       inputKey: 'temporary/' + id + '/input.' + request.inputFormat.toLowerCase(),
-      outputKey: 'temporary/' + id + '/output.' + request.outputFormat.toLowerCase(),
+      outputKey: jobOutputKey(id, request.inputFormat, request.outputFormat, request.purpose),
       uploadUntil: now + this.config.uploadSeconds * 1000,
       expiresAt: now + this.config.retentionSeconds * 1000,
     }
@@ -152,7 +157,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       const existing = await queue.getJob(id)
       if (existing) return { id, status: await existing.getState() }
       if (!this.config.acceptJobs) throw new ServiceUnavailableException('Job submission is disabled')
-      if (!isWorkerRoute(s.inputFormat, s.outputFormat) || s.color !== null) throw new BadRequestException('Conversion route not enabled')
+      if (!isWorkerRoute(s.inputFormat, s.outputFormat) || !getCompressionLevels(s.outputFormat).includes(s.compression) || s.color !== null) throw new BadRequestException('Conversion route not enabled')
       if (!this.config.queueTestMode && await this.workerCount() < 1) throw new ServiceUnavailableException('No conversion worker is available')
       if (Date.now() >= s.uploadUntil) throw new ConflictException('Upload session expired')
       const object = await this.storage.head(s.inputKey)
@@ -164,10 +169,10 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       // Extend cleanup deadline before publishing; retry with the same job id is idempotent.
       await redis.zadd(due, s.expiresAt, id)
       try { await queue.add('convert', {
-        inputKey: s.inputKey, outputKey: s.outputKey, inputFormat: s.inputFormat, outputFormat: s.outputFormat,
+        purpose: s.purpose ?? 'conversion', inputKey: s.inputKey, outputKey: s.outputKey, inputFormat: s.inputFormat, outputFormat: s.outputFormat,
         originalBytes: s.originalBytes, compression: s.compression, color: s.color,
         etag: object.ETag, expiresAt: s.expiresAt,
-      }, { jobId: id }) } catch (error) {
+      }, { jobId: id, ...(s.purpose === 'preview' ? { priority: 10 } : {}) }) } catch (error) {
         // Revisit quickly even if Redis accepted the job before the connection failed.
         // The sweeper checks actual BullMQ state before deleting any input.
         await redis.zadd(due, Math.max(Date.now() + 60000, s.uploadUntil + 60000), id).catch(() => undefined)
@@ -177,6 +182,23 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       return { id, status: published ? await published.getState() : 'waiting' }
     })
   }
+  private async waitingEstimate(position: number) {
+    if (this.config.queueTestMode) return null
+    const now = Date.now()
+    if (!this.estimateCache || now - this.estimateCache.at >= 10000) {
+      if (!this.estimateTask) this.estimateTask = (async () => {
+        const { queue } = this.ready()
+        const [completed, active, workers] = await Promise.all([queue.getCompleted(0,49),queue.getActive(0,99),this.workerCount()])
+        const at=Date.now()
+        const samples=completed.flatMap(job => job.data.purpose !== 'preview' && typeof job.processedOn==='number' && typeof job.finishedOn==='number' && job.finishedOn<=at && at-job.finishedOn<=3600000 ? [job.finishedOn-job.processedOn] : [])
+        this.estimateCache={at,samples,workers,activeElapsed:active.map(job=>typeof job.processedOn==='number'?Math.max(0,at-job.processedOn):NaN)}
+      })().catch(()=>{this.estimateCache=undefined}).finally(()=>{this.estimateTask=undefined})
+      await this.estimateTask
+    }
+    const cache=this.estimateCache
+    if(!cache)return null
+    return estimateWaitSeconds(position,cache.workers,cache.samples,cache.activeElapsed)
+  }
   async status(id: string, authorization?: string) {
     const s = await this.authorized(id, authorization)
     if (s.cancelled) return { id, status: 'cancelled' }
@@ -185,16 +207,17 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const job = await queue.getJob(id)
     if (!job) return { id, status: Date.now() >= s.uploadUntil ? 'expired' : 'awaiting-upload', originalBytes: s.originalBytes }
     const state = await job.getState()
-    // Position is a snapshot; no ETA until actual processing metrics exist.
+    // Queue position and approximate time to start, based on recent completed jobs.
     let position: number | null = null
     if (state === 'waiting') {
       const waiting = await queue.getWaiting(0, this.config.capacity - 1)
       const index = waiting.findIndex((item) => item.id === id)
       if (index >= 0) position = index + 1
     }
+    const etaSeconds = position === null ? null : await this.waitingEstimate(position)
     const outputBytes = state === 'completed' && Number.isSafeInteger(job.returnvalue?.outputBytes) && job.returnvalue.outputBytes > 0 ? job.returnvalue.outputBytes : null
     const convertedBytes = state === 'completed' && Number.isSafeInteger(job.returnvalue?.convertedBytes) && job.returnvalue.convertedBytes > 0 ? job.returnvalue.convertedBytes : null
-    return { id, status: state, position, etaSeconds: null, convertedBytes, compressionApplied: state === 'completed' ? job.returnvalue?.compressionApplied ?? false : null, warning: state === 'completed' ? job.returnvalue?.warning ?? null : null, compressionReductionPercent: outputBytes !== null && convertedBytes !== null ? Math.round((1 - outputBytes / convertedBytes) * 10000) / 100 : null, error: state === 'failed' ? 'Conversion failed. Check the input file, missing dependencies or model complexity.' : null, progress: typeof job.progress === 'number' ? job.progress : null, originalBytes: s.originalBytes, outputBytes, reductionPercent: outputBytes === null ? null : Math.round((1 - outputBytes / s.originalBytes) * 10000) / 100 }
+    return { id, status: state, outputFormat: s.outputFormat, previewKind: s.purpose === 'preview' ? previewKind(s.inputFormat) : null, position, etaSeconds, convertedBytes, compressionApplied: state === 'completed' ? job.returnvalue?.compressionApplied ?? false : null, warning: state === 'completed' ? job.returnvalue?.warning ?? null : null, compressionReductionPercent: outputBytes !== null && convertedBytes !== null ? Math.round((1 - outputBytes / convertedBytes) * 10000) / 100 : null, error: state === 'failed' ? (s.purpose === 'preview' ? 'Preview failed. The model may be unsupported or too complex.' : 'Conversion failed. Check the input file, missing dependencies or model complexity.') : null, progress: typeof job.progress === 'number' ? job.progress : null, originalBytes: s.originalBytes, outputBytes, reductionPercent: outputBytes === null ? null : Math.round((1 - outputBytes / s.originalBytes) * 10000) / 100 }
   }
   async cancel(id: string, authorization?: string) {
     await this.authorized(id, authorization)
@@ -205,13 +228,34 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       const job = await queue.getJob(id)
       if (job) {
         const state = await job.getState()
-        if (!['waiting', 'delayed', 'paused', 'prioritized'].includes(state)) throw new ConflictException('Only waiting jobs can be cancelled in this phase')
+        const releasablePreview = s.purpose === 'preview' && ['completed', 'failed'].includes(state)
+        if (!releasablePreview && !['waiting', 'delayed', 'paused', 'prioritized'].includes(state)) throw new ConflictException('Only waiting jobs or finished preview jobs can be released')
         try { await job.remove() } catch { throw new ConflictException('Job already started; cancellation unavailable') }
       }
       // Do not delete the object before the signed PUT expires; otherwise it can be recreated.
       await this.markCancelled(s)
       return { id, status: 'cancelled' }
     })
+  }
+  async previewOutput(id: string, authorization?: string) {
+    const parent = await this.authorized(id, authorization)
+    if (parent.purpose === 'preview' || parent.cancelled || Date.now() >= parent.expiresAt) throw new ConflictException('Output not available for preview')
+    const { queue } = this.ready()
+    const job = await queue.getJob(id)
+    if (!job || await job.getState() !== 'completed') throw new ConflictException('Output not ready')
+    const object = await this.storage.head(parent.outputKey)
+    if (!object?.ContentLength || !object.ETag) throw new NotFoundException('Output unavailable')
+    // The child has its own slot, token, keys and retention. Copy in storage, never buffer bytes in the API.
+    const child = await this.create({ filename: 'output.' + parent.outputFormat.toLowerCase(), size: object.ContentLength, outputFormat: 'GLB', compression: 'None', purpose: 'preview' })
+    try {
+      const session = await this.authorized(child.id, 'Bearer ' + child.token)
+      await this.storage.copy(parent.outputKey, session.inputKey, object.ETag)
+      await this.submit(child.id, 'Bearer ' + child.token)
+      return { id: child.id, token: child.token, expiresAt: child.expiresAt }
+    } catch (error) {
+      await this.cancel(child.id, 'Bearer ' + child.token).catch(() => undefined)
+      throw error
+    }
   }
   async download(id: string, authorization?: string) {
     const s = await this.authorized(id, authorization)
@@ -221,9 +265,11 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     if (!job || await job.getState() !== 'completed') throw new ConflictException('Output not ready')
     const output = await this.storage.head(s.outputKey)
     if (!output || !output.ContentLength) throw new NotFoundException('Output unavailable')
+    if (s.purpose === 'preview' && output.ContentLength > PREVIEW_MAX_BYTES) throw new ConflictException('Preview exceeds size limit')
+    const format = s.purpose === 'preview' ? previewKind(s.inputFormat) : s.outputFormat
     const seconds = Math.min(this.config.downloadSeconds, Math.floor((s.expiresAt - Date.now()) / 1000))
     if (seconds < 1) throw new ConflictException('Job expired')
-    return { url: await this.storage.signDownload(s.outputKey, seconds), expiresIn: seconds }
+    return { url: await this.storage.signDownload(s.outputKey, seconds, format, s.purpose === 'preview'), filename: (s.purpose === 'preview' ? 'preview.' : 'converted.') + format.toLowerCase(), expiresIn: seconds }
   }
   private startSweep() {
     if (this.closing || this.sweepTask || !this.storage.configured) return

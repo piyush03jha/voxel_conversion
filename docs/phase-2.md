@@ -34,3 +34,5 @@ Default upload URL: 15 minutes. Job lifetime: 24 hours from session creation. Ex
 - Keep QUEUE_ACCEPT_JOBS=false until the real worker, content validation, resource limits, and integration tests are ready. The public upload UI remains disabled; see phase-3.md for worker integration.
 
 Known limitations: no actual conversion, no running worker, no active-job cancellation, no measured ETA, no verified production provider/deployment. Signed upload length enforcement, conditional writes, cleanup under concurrency and 200 MiB resource behavior require live integration tests. The API lockfile needs regeneration; install and commit it before deploying.
+
+Phase 6 output preview uses a bounded signed GET only when explicitly selected. Allow GET in the storage bucket CORS policy for the exact web origin in addition to PUT and the required upload headers. See phase-6.md.
