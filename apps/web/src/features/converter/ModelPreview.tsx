@@ -33,8 +33,8 @@ export default function ModelPreview({file,result,busy}:{file:File|null;result:R
     return()=>controller.abort()
   },[showOutput,result,outputAvailable,busy,loaded,error])
   const outputSelected=showOutput&&!!result
-  const preview=busy?null:outputSelected?(loaded?.result===result?loaded.file:null):sourceAvailable?file:null
-  const message=busy?'Preview paused during processing to reduce memory usage.':outputSelected?(error?.result===result?error.message:!outputAvailable?'This output format or size cannot be previewed locally.':!preview?'Loading output preview…':''):file&&!sourceAvailable?'Input preview unavailable for this format or size. You can still convert the file.':''
+  const preview=busy?null:outputSelected?(loaded && loaded.result===result?loaded.file:null):sourceAvailable?file:null
+  const message=busy?'Preview paused during processing to reduce memory usage.':outputSelected?(error && error.result===result?error.message:!outputAvailable?'This output format or size cannot be previewed locally.':!preview?'Loading output preview…':''):file&&!sourceAvailable?'Input preview unavailable for this format or size. You can still convert the file.':''
   return <>
     {message?<div className="scene-loading preview-message" role="status">{message}</div>:<SampleViewport file={preview}/>}
     <div className="preview-label"><span className="live-dot"/> {busy?'PROCESSING':preview?outputSelected?'OUTPUT GEOMETRY':'INPUT GEOMETRY':file?'PREVIEW UNAVAILABLE':'INTERACTIVE SAMPLE SCENE'}</div>

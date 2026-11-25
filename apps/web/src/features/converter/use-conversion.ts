@@ -139,6 +139,7 @@ export function useConversion(){
     if(run.session&&run.submissionStarted){
       try{
         await api.cancel(run.session)
+        if(active.current!==run)return
         run.cancelled=true;pending.current=null;run.controller.abort()
       }catch(error){patch(run,{error:error instanceof Error?error.message:'Server job could not be cancelled.'})}
       finally{run.cancelling=false}

@@ -189,8 +189,8 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
         const { queue } = this.ready()
         const [completed, active, workers] = await Promise.all([queue.getCompleted(0,49),queue.getActive(0,99),this.workerCount()])
         const at=Date.now()
-        const samples=completed.flatMap(job => typeof job.processedOn==='number' && typeof job.finishedOn==='number' && at-job.finishedOn<=3600000 ? [job.finishedOn-job.processedOn] : [])
-        this.estimateCache={at,samples,workers,activeElapsed:active.map(job=>typeof job.processedOn==='number'?Math.max(0,at-job.processedOn):0)}
+        const samples=completed.flatMap(job => typeof job.processedOn==='number' && typeof job.finishedOn==='number' && job.finishedOn<=at && at-job.finishedOn<=3600000 ? [job.finishedOn-job.processedOn] : [])
+        this.estimateCache={at,samples,workers,activeElapsed:active.map(job=>typeof job.processedOn==='number'?Math.max(0,at-job.processedOn):NaN)}
       })().catch(()=>{this.estimateCache=undefined}).finally(()=>{this.estimateTask=undefined})
       await this.estimateTask
     }

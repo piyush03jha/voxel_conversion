@@ -196,7 +196,7 @@ function App() {
           </div>
           <div className="preview-window">
             <div className="preview-grid" aria-hidden="true" />
-            <ModelPreview key={file ? file.name + ':' + file.size + ':' + file.lastModified : 'empty'} file={file} result={job.result} busy={job.busy} />
+            <ModelPreview key={(file ? file.name + ':' + file.size + ':' + file.lastModified : 'empty') + ':' + (job.busy ? 'busy' : job.result ? 'result' : 'input')} file={file} result={job.result} busy={job.busy} />
           </div>
         </div>
 
