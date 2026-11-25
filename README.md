@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Formshift — 3D File Workshop
 
 An independent 3D conversion and compression project. The current milestone is a responsive React/Vite interface with upload validation, a format compatibility map, and an interactive sample viewport. Conversion requests are not sent anywhere yet; the API, queue, storage, and worker services are the next milestone.
@@ -34,3 +35,6 @@ Do not upload models into Redis or buffer full uploads in API memory. Keep infra
 - Queue position, ETA, output size, and compression results are not available yet.
 - Compression and color controls are UI state only; no output file is created.
 - GLB-only output is the only advertised conversion target until each additional exporter is implemented and tested.
+=======
+# voxel_conversion
+>>>>>>> 42d8c6d415e923d353a993de961583c6bc5a0fa8
