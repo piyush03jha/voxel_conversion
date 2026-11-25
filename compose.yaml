@@ -29,6 +29,29 @@ services:
         mc mb --ignore-existing local/formshift-temp
         mc ilm rule add --expire-days 2 local/formshift-temp
     restart: "no"
+  worker:
+    profiles: ["worker"]
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    env_file: .env
+    environment:
+      NODE_ENV: development
+      REDIS_URL: redis://redis:6379
+      STORAGE_ENDPOINT: http://minio:9000
+      WORKER_STL_ENGINE: native
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    mem_limit: 1024m
+    cpus: 1.0
+    pids_limit: 128
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    stop_grace_period: 30s
+    restart: "on-failure:3"
 volumes:
   redis-data:
   minio-data:

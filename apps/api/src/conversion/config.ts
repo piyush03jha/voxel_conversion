@@ -5,6 +5,7 @@ export function intEnv(name: string, fallback: number, min: number, max: number)
   return value
 }
 export const settings = () => ({
+  queueTestMode: process.env.QUEUE_TEST_MODE === 'true',
   acceptJobs: process.env.QUEUE_ACCEPT_JOBS === 'true',
   capacity: intEnv('QUEUE_CAPACITY', 100, 1, 100),
   uploadSeconds: intEnv('UPLOAD_URL_TTL_SECONDS', 900, 60, 1800),

@@ -3,7 +3,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import Redis from 'ioredis'
 import { Queue } from 'bullmq'
 import type { ConversionJobData, ConversionJobResult } from '../../../../packages/shared/src/jobs'
-import { QUEUE_NAME } from '../../../../packages/shared/src/jobs'
+import { QUEUE_NAME, WORKER_HEARTBEATS, isWorkerRoute } from '../../../../packages/shared/src/jobs'
 import { settings } from './config'
 import { StorageService, UPLOAD_HEADERS } from './storage.service'
 import { tokenHash, validateUpload } from './validation'
@@ -78,8 +78,17 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     if (this.closing || !this.redis || this.redis.status !== 'ready' || !this.queue) throw new ServiceUnavailableException('Queue unavailable')
     return { redis: this.redis, queue: this.queue }
   }
-  get health() {
-    return { redis: this.redis?.status === 'ready', storageConfigured: this.storage.configured, acceptingJobs: this.config.acceptJobs && this.redis?.status === 'ready' && this.storage.configured }
+  async workerCount(): Promise<number> {
+    if (this.redis?.status !== 'ready') return 0
+    try { return await this.redis.zcount(WORKER_HEARTBEATS, '(' + Date.now(), '+inf') }
+    catch { return 0 }
+  }
+  async health() {
+    const workers = await this.workerCount()
+    const configured = this.config.acceptJobs && this.redis?.status === 'ready' && this.storage.configured
+    return { redis: this.redis?.status === 'ready', storageConfigured: this.storage.configured,
+      workers, acceptingJobs: configured && (workers > 0 || this.config.queueTestMode),
+      conversionAvailable: configured && workers > 0 && !this.config.queueTestMode }
   }
   private async read(id: string): Promise<Session | null> {
     if (!/^[0-9a-f-]{36}$/.test(id)) return null
@@ -103,6 +112,8 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   async create(body: unknown) {
     if (!this.config.acceptJobs || !this.storage.configured) throw new ServiceUnavailableException('Job submission is disabled')
     const request = validateUpload(body)
+    if (!isWorkerRoute(request.inputFormat, request.outputFormat) || request.compression !== 'None' || request.color !== null) throw new BadRequestException('Phase 3 supports STL to GLB without compression or custom color')
+    if (!this.config.queueTestMode && await this.workerCount() < 1) throw new ServiceUnavailableException('No conversion worker is available')
     const { redis } = this.ready()
     const count = Number(await redis.eval(RATE, 1, prefix + 'create-rate'))
     if (count > this.config.createsPerMinute) throw new HttpException('Upload creation rate limit reached', HttpStatus.TOO_MANY_REQUESTS)
@@ -141,6 +152,8 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       const existing = await queue.getJob(id)
       if (existing) return { id, status: await existing.getState() }
       if (!this.config.acceptJobs) throw new ServiceUnavailableException('Job submission is disabled')
+      if (!isWorkerRoute(s.inputFormat, s.outputFormat) || s.compression !== 'None' || s.color !== null) throw new BadRequestException('Conversion route not enabled')
+      if (!this.config.queueTestMode && await this.workerCount() < 1) throw new ServiceUnavailableException('No conversion worker is available')
       if (Date.now() >= s.uploadUntil) throw new ConflictException('Upload session expired')
       const object = await this.storage.head(s.inputKey)
       if (!object) throw new ConflictException('Upload not found; finish uploading first')
@@ -160,7 +173,8 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
         await redis.zadd(due, Math.max(Date.now() + 60000, s.uploadUntil + 60000), id).catch(() => undefined)
         throw error
       }
-      return { id, status: 'waiting' }
+      const published = await queue.getJob(id)
+      return { id, status: published ? await published.getState() : 'waiting' }
     })
   }
   async status(id: string, authorization?: string) {
@@ -178,8 +192,8 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       const index = waiting.findIndex((item) => item.id === id)
       if (index >= 0) position = index + 1
     }
-    const outputBytes = state === 'completed' && Number.isSafeInteger(job.returnvalue?.outputBytes) ? job.returnvalue.outputBytes : null
-    return { id, status: state, position, etaSeconds: null, progress: typeof job.progress === 'number' ? job.progress : null, originalBytes: s.originalBytes, outputBytes, reductionPercent: outputBytes === null ? null : Math.round((1 - outputBytes / s.originalBytes) * 10000) / 100 }
+    const outputBytes = state === 'completed' && Number.isSafeInteger(job.returnvalue?.outputBytes) && job.returnvalue.outputBytes > 0 ? job.returnvalue.outputBytes : null
+    return { id, status: state, position, etaSeconds: null, error: state === 'failed' ? 'Conversion failed. Check the STL file or try a less complex model.' : null, progress: typeof job.progress === 'number' ? job.progress : null, originalBytes: s.originalBytes, outputBytes, reductionPercent: outputBytes === null ? null : Math.round((1 - outputBytes / s.originalBytes) * 10000) / 100 }
   }
   async cancel(id: string, authorization?: string) {
     await this.authorized(id, authorization)

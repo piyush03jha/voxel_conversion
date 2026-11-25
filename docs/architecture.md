@@ -1,9 +1,7 @@
 # Architecture
 
-Web and NestJS API are independent packages; shared TypeScript defines format compatibility, limits, and the queue contract.
+Web and NestJS API are independent services; the worker is an independently deployed process built with the same npm dependencies. Shared TypeScript defines format compatibility, limits and queue contract.
 
-Flow: browser requests a signed upload → private temporary object storage (direct PUT) → API verifies object metadata → shared Redis/BullMQ queue → isolated worker (Phase 3) → temporary output → signed download.
+Browser → signed upload to private temporary storage → API verifies object metadata → Redis/BullMQ → isolated job directory and bounded native converter → temporary output → signed download.
 
-Phase 2 implements the API-side queue and storage lifecycle; all conversion output pairs remain disabled and job admission is off by default. Two worker replicas with concurrency one are planned, subject to hosting resources. No model bytes are stored in Redis or buffered by the API. See phase-2.md for configuration, safety boundaries, and integration tests.
-
-ADVFX remains independent and unmodified. Reuse its import and optimization code in the next phase.
+Phase 3 adds STL-to-GLB with the ADVFX native script, strict content preflight, worker heartbeats, one job per replica, and resource limits. Other importer scripts are ported but not enabled. Public admission stays disabled; see phase-3.md for security and testing gaps. ADVFX production remains untouched.

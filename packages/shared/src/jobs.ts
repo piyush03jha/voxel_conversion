@@ -17,3 +17,9 @@ export interface ConversionJobData {
 export interface ConversionJobResult {
   outputBytes: number
 }
+
+export const WORKER_HEARTBEATS = 'formshift:worker-heartbeats:v1'
+export const ACTIVE_INPUTS = ['STL'] as const
+export function isWorkerRoute(input: string, output: string): boolean {
+  return input === 'STL' && output === 'GLB'
+}

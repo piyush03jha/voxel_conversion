@@ -1,14 +1,14 @@
 # Formshift — 3D File Workshop
 
-Standalone 3D file converter. Phase 2 adds private temporary-storage upload sessions, Redis/BullMQ queue admission, job status/cancellation, and cleanup. No conversion worker is running; public job submission remains disabled.
+Standalone 3D file converter. Phase 3 adds the first STL-to-GLB conversion worker using the ADVFX native converter. Public job submission remains disabled pending verification.
 
 ## Layout
 
 - apps/web: existing React/Vite interface and bounded local STL preview.
 - apps/api: NestJS metadata, storage and queue API.
-- apps/worker: worker contract for the next phase.
+- apps/worker: independent conversion worker and vendored ADVFX scripts.
 - packages/shared: format definitions and queue types.
-- docs/phase-2.md: API, security, deployment and smoke-test instructions.
+- docs/phase-2.md and docs/phase-3.md: API, worker, security, deployment and smoke-test instructions.
 
 ## Local development
 
@@ -29,7 +29,7 @@ npm run dev:web
 npm run dev:api
 ```
 
-Web: http://localhost:5173. API: http://localhost:3001/api/health and /api/formats. For a local queue smoke test, set QUEUE_ACCEPT_JOBS=true before starting the API and run npm run smoke:queue. Reset to false for public deployments.
+Web: http://localhost:5173. API: http://localhost:3001/api/health and /api/formats. For a local conversion smoke test, set QUEUE_ACCEPT_JOBS=true and QUEUE_TEST_MODE=false, then run npm run worker:up and npm run smoke:conversion. See docs/phase-3.md. Reset to false for public deployments.
 
 ```sh
 npm test
@@ -37,4 +37,4 @@ npm run build
 npm run lint
 ```
 
-The API lockfile must be refreshed by npm run setup and committed before deploying. The existing frontend lockfile is unchanged. See docs/phase-2.md for exact storage setup and limitations. Actual conversions, compression, exported color and real ETA remain Phase 3+.
+The API lockfile must be refreshed by npm run setup and committed before deploying. The existing frontend lockfile is unchanged. See docs/phase-2.md for exact storage setup and limitations. Only STL to GLB with no optional processing is implemented. Additional formats, compression, exported color, real ETA and frontend submission remain pending.

@@ -1,0 +1,2 @@
+# ADVFX reuse
+These three scripts are copied unchanged from the owner's [ADVFX repository](https://github.com/piyush03jha/ADVFX/tree/0a7cd3d4c5e5210f28052a2108fc4142cc1ebe4e/3d-commerce-api/scripts) at commit 0a7cd3d4c5e5210f28052a2108fc4142cc1ebe4e. The worker invokes only the dense-mesh STL route by default. The 3MF and Blender importers are retained for subsequent safe format integration; no automated fallback for invalid or unsupported inputs. No changes to ADVFX.

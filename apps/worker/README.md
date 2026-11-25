@@ -1,5 +1,9 @@
-# Conversion worker (Phase 3)
+# Conversion worker — Phase 3
 
-Consume the shared BullMQ queue `model-conversion` using the same REDIS_URL and queue prefix (BullMQ default). The contract is in packages/shared/src/jobs.ts. Each replica must use concurrency 1, attempts 1, and an isolated temporary directory.
+Independent BullMQ worker process and Docker image; one active job per replica. It uses the existing API dependency package and shared build so dependency versions are consistent. The compiled worker runs separately from NestJS and has no HTTP listener.
 
-Validate expiry before processing, stream the input from private storage using its expected ETag (If-Match), check the actual byte count and content/archives, then run bounded conversion. Write output only to the supplied outputKey. Return { outputBytes } only after a successful upload. Never expose raw exception messages to users. Cleanup local files on every path. The API will not remove a locked active job; worker must enforce expiry and timeout. Input/output object deletion is handled by API expiry sweeps plus bucket lifecycle. No worker is active in Phase 2.
+The default route is STL → GLB (compression None, original/default color). It uses the ADVFX native Python converter, with strict ASCII/binary STL validation, bounded streaming transfers, ETag checks, process-group timeout, Linux prlimit memory/CPU/file-size limits, GLB container verification and temporary directory cleanup. No Blender fallback on invalid inputs.
+
+The ADVFX Blender and 3MF scripts are vendored, not advertised as operational. On a trusted Linux development machine only, WORKER_STL_ENGINE=blender may be used with Blender 4.5 installed to exercise the STL importer; not supported by the default Docker image. It is prohibited in production. No network namespace or per-job filesystem sandbox yet: do not expose arbitrary Blender/3MF/OBJ/USD inputs to the worker.
+
+See docs/phase-3.md for setup, limits and end-to-end smoke test.
