@@ -8,14 +8,14 @@ import { QUEUE_NAME, WORKER_HEARTBEATS } from '../../../packages/shared/src/jobs
 import type { ConversionJobData, ConversionJobResult } from '../../../packages/shared/src/jobs'
 import { workerConfig } from './config'
 import { checkJob } from './contract'
-import { convertJob, probeSandbox } from './process'
+import { convertJob, createPreview, probeSandbox } from './process'
 import { storageClient, checkStorage, downloadInput, uploadOutput } from './storage'
 
 async function main() {
   const config = workerConfig()
   if (process.platform !== 'linux') throw new Error('Use a Linux or Docker worker')
   await access(config.workRoot, constants.W_OK)
-  for (const script of ['validate-stl.py', 'validate-input.py', 'dense-mesh-to-glb.py', 'threemf-to-glb.py', 'blender-convert.py', 'export_handlers.py', 'embed-gltf.py', 'verify-output.py']) await access(join(config.scriptsDir, script), constants.R_OK)
+  for (const script of ['validate-stl.py', 'validate-input.py', 'dense-mesh-to-glb.py', 'threemf-to-glb.py', 'blender-convert.py', 'export_handlers.py', 'embed-gltf.py', 'verify-output.py', 'preview_mesh.py']) await access(join(config.scriptsDir, script), constants.R_OK)
   // Verify executable availability before announcing a worker.
   const { spawnSync } = await import('node:child_process')
   for (const executable of ['prlimit', config.python, config.blender, config.optimizer, 'pdftocairo', 'rsvg-convert', ...(config.sandbox === 'bwrap' ? ['bwrap'] : [])]) {
@@ -62,7 +62,7 @@ async function main() {
       await bounded(job.updateProgress(5))
       await downloadInput(storage, config, job.data, input, controller.signal)
       await bounded(job.updateProgress(25))
-      const result = await convertJob(config, dir, input, job.data.inputFormat, job.data.outputFormat, job.data.compression, controller.signal)
+      const result = job.data.purpose === 'preview' ? await createPreview(config, dir, input, job.data.inputFormat, controller.signal) : await convertJob(config, dir, input, job.data.inputFormat, job.data.outputFormat, job.data.compression, controller.signal)
       controller.signal.throwIfAborted()
       await bounded(job.updateProgress(85))
       await ownLock()

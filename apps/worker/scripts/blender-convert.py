@@ -18,6 +18,7 @@ parser.add_argument("--ext", required=True)
 parser.add_argument("--target", default="GLB")
 parser.add_argument("--compression", default="None")
 parser.add_argument("--candidate")
+parser.add_argument("--preview", action="store_true")
 args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:])
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -486,7 +487,11 @@ try:
         raise RuntimeError("Imported objects could not be selected for export")
     bpy.context.view_layer.objects.active = bpy.context.selected_objects[0]
 
-    if args.target == "GLB":
+    if args.preview:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from preview_mesh import write_preview
+        write_preview(args.output)
+    elif args.target == "GLB":
         bpy.ops.export_scene.gltf(
             filepath=args.output,
             export_format="GLB",

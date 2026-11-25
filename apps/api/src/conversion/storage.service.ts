@@ -1,5 +1,5 @@
 import { Injectable, OnModuleDestroy, ServiceUnavailableException } from '@nestjs/common'
-import { S3Client, PutObjectCommand, HeadObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, HeadObjectCommand, DeleteObjectCommand, GetObjectCommand, CopyObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
 import type { ModelFormat } from '../../../../packages/shared/src/compatibility'
@@ -54,10 +54,14 @@ export class StorageService implements OnModuleDestroy {
     const { client, Bucket } = this.ready()
     await client.send(new DeleteObjectCommand({ Bucket, Key: key }), { abortSignal: AbortSignal.timeout(8000) })
   }
-  async signDownload(key: string, expiresIn: number, format: ModelFormat) {
+  async copy(source: string, target: string, etag: string) {
+    const { client, Bucket } = this.ready()
+    await client.send(new CopyObjectCommand({ Bucket, Key: target, CopySource: encodeURIComponent(Bucket) + '/' + source.split('/').map(encodeURIComponent).join('/'), CopySourceIfMatch: etag }), { abortSignal: AbortSignal.timeout(60000) })
+  }
+  async signDownload(key: string, expiresIn: number, format: ModelFormat | 'PNG') {
     const { client, Bucket } = this.ready()
     return getSignedUrl(client, new GetObjectCommand({
-      Bucket, Key: key, ResponseContentDisposition: 'attachment; filename="converted.' + format.toLowerCase() + '"', ResponseContentType: 'application/octet-stream',
+      Bucket, Key: key, ResponseContentDisposition: 'attachment; filename="' + (format === 'PNG' ? 'preview.' : 'converted.') + format.toLowerCase() + '"', ResponseContentType: 'application/octet-stream',
     }), { expiresIn })
   }
   onModuleDestroy() { this.client?.destroy() }

@@ -5,6 +5,7 @@ import { Queue } from 'bullmq'
 import type { ConversionJobData, ConversionJobResult } from '../../../../packages/shared/src/jobs'
 import { getCompressionLevels } from '../../../../packages/shared/src/compatibility'
 import { QUEUE_NAME, WORKER_HEARTBEATS, isWorkerRoute } from '../../../../packages/shared/src/jobs'
+import { jobOutputKey, previewKind, PREVIEW_MAX_BYTES } from '../../../../packages/shared/src/preview'
 import { estimateWaitSeconds } from './queue-estimate'
 import { settings } from './config'
 import { StorageService, UPLOAD_HEADERS } from './storage.service'
@@ -127,7 +128,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const session: Session = {
       ...request, id, hash: tokenHash(token),
       inputKey: 'temporary/' + id + '/input.' + request.inputFormat.toLowerCase(),
-      outputKey: 'temporary/' + id + '/output.' + request.outputFormat.toLowerCase(),
+      outputKey: jobOutputKey(id, request.inputFormat, request.outputFormat, request.purpose),
       uploadUntil: now + this.config.uploadSeconds * 1000,
       expiresAt: now + this.config.retentionSeconds * 1000,
     }
@@ -168,10 +169,10 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       // Extend cleanup deadline before publishing; retry with the same job id is idempotent.
       await redis.zadd(due, s.expiresAt, id)
       try { await queue.add('convert', {
-        inputKey: s.inputKey, outputKey: s.outputKey, inputFormat: s.inputFormat, outputFormat: s.outputFormat,
+        purpose: s.purpose ?? 'conversion', inputKey: s.inputKey, outputKey: s.outputKey, inputFormat: s.inputFormat, outputFormat: s.outputFormat,
         originalBytes: s.originalBytes, compression: s.compression, color: s.color,
         etag: object.ETag, expiresAt: s.expiresAt,
-      }, { jobId: id }) } catch (error) {
+      }, { jobId: id, ...(s.purpose === 'preview' ? { priority: 10 } : {}) }) } catch (error) {
         // Revisit quickly even if Redis accepted the job before the connection failed.
         // The sweeper checks actual BullMQ state before deleting any input.
         await redis.zadd(due, Math.max(Date.now() + 60000, s.uploadUntil + 60000), id).catch(() => undefined)
@@ -189,7 +190,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
         const { queue } = this.ready()
         const [completed, active, workers] = await Promise.all([queue.getCompleted(0,49),queue.getActive(0,99),this.workerCount()])
         const at=Date.now()
-        const samples=completed.flatMap(job => typeof job.processedOn==='number' && typeof job.finishedOn==='number' && job.finishedOn<=at && at-job.finishedOn<=3600000 ? [job.finishedOn-job.processedOn] : [])
+        const samples=completed.flatMap(job => job.data.purpose !== 'preview' && typeof job.processedOn==='number' && typeof job.finishedOn==='number' && job.finishedOn<=at && at-job.finishedOn<=3600000 ? [job.finishedOn-job.processedOn] : [])
         this.estimateCache={at,samples,workers,activeElapsed:active.map(job=>typeof job.processedOn==='number'?Math.max(0,at-job.processedOn):NaN)}
       })().catch(()=>{this.estimateCache=undefined}).finally(()=>{this.estimateTask=undefined})
       await this.estimateTask
@@ -216,7 +217,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const etaSeconds = position === null ? null : await this.waitingEstimate(position)
     const outputBytes = state === 'completed' && Number.isSafeInteger(job.returnvalue?.outputBytes) && job.returnvalue.outputBytes > 0 ? job.returnvalue.outputBytes : null
     const convertedBytes = state === 'completed' && Number.isSafeInteger(job.returnvalue?.convertedBytes) && job.returnvalue.convertedBytes > 0 ? job.returnvalue.convertedBytes : null
-    return { id, status: state, outputFormat: s.outputFormat, position, etaSeconds, convertedBytes, compressionApplied: state === 'completed' ? job.returnvalue?.compressionApplied ?? false : null, warning: state === 'completed' ? job.returnvalue?.warning ?? null : null, compressionReductionPercent: outputBytes !== null && convertedBytes !== null ? Math.round((1 - outputBytes / convertedBytes) * 10000) / 100 : null, error: state === 'failed' ? 'Conversion failed. Check the input file, missing dependencies or model complexity.' : null, progress: typeof job.progress === 'number' ? job.progress : null, originalBytes: s.originalBytes, outputBytes, reductionPercent: outputBytes === null ? null : Math.round((1 - outputBytes / s.originalBytes) * 10000) / 100 }
+    return { id, status: state, outputFormat: s.outputFormat, previewKind: s.purpose === 'preview' ? previewKind(s.inputFormat) : null, position, etaSeconds, convertedBytes, compressionApplied: state === 'completed' ? job.returnvalue?.compressionApplied ?? false : null, warning: state === 'completed' ? job.returnvalue?.warning ?? null : null, compressionReductionPercent: outputBytes !== null && convertedBytes !== null ? Math.round((1 - outputBytes / convertedBytes) * 10000) / 100 : null, error: state === 'failed' ? 'Conversion failed. Check the input file, missing dependencies or model complexity.' : null, progress: typeof job.progress === 'number' ? job.progress : null, originalBytes: s.originalBytes, outputBytes, reductionPercent: outputBytes === null ? null : Math.round((1 - outputBytes / s.originalBytes) * 10000) / 100 }
   }
   async cancel(id: string, authorization?: string) {
     await this.authorized(id, authorization)
@@ -235,6 +236,26 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       return { id, status: 'cancelled' }
     })
   }
+  async previewOutput(id: string, authorization?: string) {
+    const parent = await this.authorized(id, authorization)
+    if (parent.purpose === 'preview' || parent.cancelled || Date.now() >= parent.expiresAt) throw new ConflictException('Output not available for preview')
+    const { queue } = this.ready()
+    const job = await queue.getJob(id)
+    if (!job || await job.getState() !== 'completed') throw new ConflictException('Output not ready')
+    const object = await this.storage.head(parent.outputKey)
+    if (!object?.ContentLength || !object.ETag) throw new NotFoundException('Output unavailable')
+    // The child has its own slot, token, keys and retention. Copy in storage, never buffer bytes in the API.
+    const child = await this.create({ filename: 'output.' + parent.outputFormat.toLowerCase(), size: object.ContentLength, outputFormat: 'GLB', compression: 'None', purpose: 'preview' })
+    try {
+      const session = await this.authorized(child.id, 'Bearer ' + child.token)
+      await this.storage.copy(parent.outputKey, session.inputKey, object.ETag)
+      await this.submit(child.id, 'Bearer ' + child.token)
+      return { id: child.id, token: child.token, expiresAt: child.expiresAt }
+    } catch (error) {
+      await this.cancel(child.id, 'Bearer ' + child.token).catch(() => undefined)
+      throw error
+    }
+  }
   async download(id: string, authorization?: string) {
     const s = await this.authorized(id, authorization)
     if (s.cancelled || Date.now() >= s.expiresAt) throw new ConflictException('Job expired or cancelled')
@@ -243,9 +264,11 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     if (!job || await job.getState() !== 'completed') throw new ConflictException('Output not ready')
     const output = await this.storage.head(s.outputKey)
     if (!output || !output.ContentLength) throw new NotFoundException('Output unavailable')
+    if (s.purpose === 'preview' && output.ContentLength > PREVIEW_MAX_BYTES) throw new ConflictException('Preview exceeds size limit')
+    const format = s.purpose === 'preview' ? previewKind(s.inputFormat) : s.outputFormat
     const seconds = Math.min(this.config.downloadSeconds, Math.floor((s.expiresAt - Date.now()) / 1000))
     if (seconds < 1) throw new ConflictException('Job expired')
-    return { url: await this.storage.signDownload(s.outputKey, seconds, s.outputFormat), filename: 'converted.' + s.outputFormat.toLowerCase(), expiresIn: seconds }
+    return { url: await this.storage.signDownload(s.outputKey, seconds, format), filename: (s.purpose === 'preview' ? 'preview.' : 'converted.') + format.toLowerCase(), expiresIn: seconds }
   }
   private startSweep() {
     if (this.closing || this.sweepTask || !this.storage.configured) return

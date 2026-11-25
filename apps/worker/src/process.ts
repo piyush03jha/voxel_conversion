@@ -7,6 +7,8 @@ import type { WorkerConfig } from './config'
 import { getOutputWarning } from '../../../packages/shared/src/compatibility'
 import type { ModelFormat } from '../../../packages/shared/src/compatibility'
 import type { CompressionLevel } from '../../../packages/shared/src/jobs'
+import { previewKind, PREVIEW_MAX_BYTES } from '../../../packages/shared/src/preview'
+import { open } from 'node:fs/promises'
 import { readGlbInfo } from './storage'
 
 function environment(config: WorkerConfig, dir: string) {
@@ -196,4 +198,28 @@ export async function convertJob(config: WorkerConfig, dir: string, input: strin
   }
   return { path: output, convertedBytes: bytes, outputBytes: bytes, compressionApplied: false,
     warning: [warning, level !== 'None' ? 'Compression unavailable or not smaller; original export retained.' : null].filter(Boolean).join(' ') || null }
+}
+
+export async function createPreview(config: WorkerConfig, dir: string, input: string, source: ModelFormat, signal: AbortSignal) {
+  const kind=previewKind(source), output=join(dir,'preview.'+kind.toLowerCase()), ext='.'+source.toLowerCase()
+  const deadline=AbortSignal.any([signal,AbortSignal.timeout(120000)])
+  const boundedConfig={...config,maxOutputBytes:PREVIEW_MAX_BYTES}
+  if(source==='STL')await run(config,dir,[config.python,'-I',join(config.scriptsDir,'validate-stl.py'),input],deadline,config.memoryMb)
+  else await run(config,dir,[config.python,'-I',join(config.scriptsDir,'validate-input.py'),input,ext],deadline,config.memoryMb)
+  if(source==='PDF')await run(boundedConfig,dir,['pdftocairo','-f','1','-l','1','-singlefile','-scale-to','1200','-png',input,join(dir,'preview')],deadline,config.memoryMb)
+  else if(source==='SVG')await run(boundedConfig,dir,['rsvg-convert','-w','1200','-h','1200','--keep-aspect-ratio','-o',output,input],deadline,config.memoryMb)
+  else await run(boundedConfig,dir,[config.blender,'--background','--factory-startup','--disable-autoexec','--threads',String(config.threads),'--python-exit-code','1','--python',join(config.scriptsDir,'blender-convert.py'),'--','--input',input,'--output',output,'--ext',ext,'--preview'],deadline,config.blenderAddressMb)
+  let bytes:number
+  if(kind==='GLB')bytes=(await readGlbInfo(output,PREVIEW_MAX_BYTES)).bytes
+  else{
+    bytes=(await stat(output)).size
+    if(bytes<33||bytes>PREVIEW_MAX_BYTES)throw new Error('INVALID_PREVIEW')
+    const handle=await open(output,'r')
+    try{
+      const h=Buffer.alloc(24)
+      if((await handle.read(h,0,h.length,0)).bytesRead!==24||h.toString('hex',0,8)!=='89504e470d0a1a0a'||h.toString('ascii',12,16)!=='IHDR'||h.readUInt32BE(16)<1||h.readUInt32BE(16)>1200||h.readUInt32BE(20)<1||h.readUInt32BE(20)>1200)throw new Error('INVALID_PREVIEW')
+    }finally{await handle.close()}
+  }
+  deadline.throwIfAborted()
+  return {path:output,outputBytes:bytes,convertedBytes:bytes,compressionApplied:false,warning:kind==='PNG'?'Raster document preview (first page for PDF).':'Approximate static geometry preview; large meshes may be sampled.'}
 }
