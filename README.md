@@ -12,12 +12,13 @@ Standalone 3D file converter. Phase 3 integrates existing ADVFX imports. Phase 4
 
 ## Local development
 
-Node.js 22.12+, Docker Compose.
+Node.js 22.12+, Docker Compose v2. Local storage now uses SeaweedFS (MinIO images were removed from Docker Hub). Existing local .env endpoint and credentials still work.
 
 ```sh
 npm run setup
 cp -n .env.example .env
 npm run infra:up
+# Wait for storage-init to pass the S3 compatibility checks.
 ```
 
 If you already have a .env from Phase 1, add the new variables from .env.example rather than overwriting it.
@@ -29,7 +30,7 @@ npm run dev:web
 npm run dev:api
 ```
 
-Web: http://localhost:5173. API: http://localhost:3001/api/health and /api/formats. For a local conversion smoke test, set QUEUE_ACCEPT_JOBS=true and QUEUE_TEST_MODE=false, then run npm run worker:up and npm run smoke:conversion. See docs/phase-3.md. Reset to false for public deployments.
+Storage logs: docker compose logs storage storage-init. Local S3: http://127.0.0.1:9000 (no MinIO console). Web: http://localhost:5173. API: http://localhost:3001/api/health and /api/formats. For a local conversion smoke test, set QUEUE_ACCEPT_JOBS=true and QUEUE_TEST_MODE=false, then run npm run worker:up and npm run smoke:conversion. See docs/phase-3.md. Reset to false for public deployments.
 
 ```sh
 npm test
@@ -46,3 +47,5 @@ See [browser-first routing and frontend integration](docs/browser-first.md). Eli
 Phase 6 UI, bounded model preview, measured queue wait estimation, and resumable status tracking are documented in [Phase 6](docs/phase-6.md). Server output preview requires GET CORS on temporary storage. Runtime verification remains pending.
 
 All 15 formats have preview routes; see [all-format preview](docs/preview-all-formats.md). Server previews are optional, bounded and separate from conversion results.
+
+See [local infrastructure troubleshooting](docs/local-infra.md) for the MinIO replacement, startup checks and migration notes.

@@ -9,25 +9,27 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
+  storage:
+    image: chrislusf/seaweedfs:4.53
+    command: ["mini", "-dir=/data"]
     environment:
-      MINIO_ROOT_USER: formshiftlocal
-      MINIO_ROOT_PASSWORD: formshift-local-dev-password
-      MINIO_API_CORS_ALLOW_ORIGIN: http://localhost:5173
-    ports: ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
-    volumes: ["minio-data:/data"]
-  minio-init:
-    image: minio/mc:latest
-    depends_on: [minio]
-    entrypoint:
-      - /bin/sh
-      - -ec
-      - |
-        until mc alias set local http://minio:9000 formshiftlocal formshift-local-dev-password; do sleep 2; done
-        mc mb --ignore-existing local/formshift-temp
-        mc ilm rule add --expire-days 2 local/formshift-temp
+      AWS_ACCESS_KEY_ID: formshiftlocal
+      AWS_SECRET_ACCESS_KEY: formshift-local-dev-password
+      S3_BUCKET: formshift-temp
+    ports: ["127.0.0.1:9000:8333"]
+    volumes: ["seaweed-data:/data"]
+  storage-init:
+    build:
+      context: .
+      dockerfile: infra/storage-init/Dockerfile
+    environment:
+      STORAGE_ENDPOINT: http://storage:8333
+      STORAGE_REGION: us-east-1
+      STORAGE_BUCKET: formshift-temp
+      STORAGE_ACCESS_KEY_ID: formshiftlocal
+      STORAGE_SECRET_ACCESS_KEY: formshift-local-dev-password
+      WEB_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+    depends_on: [storage]
     restart: "no"
   worker:
     profiles: ["worker"]
@@ -38,13 +40,13 @@ services:
     environment:
       NODE_ENV: development
       REDIS_URL: redis://redis:6379
-      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_ENDPOINT: http://storage:8333
       WORKER_STL_ENGINE: native
       WORKER_SANDBOX: trusted-local
     depends_on:
       redis:
         condition: service_healthy
-      minio-init:
+      storage-init:
         condition: service_completed_successfully
     mem_limit: 1024m
     cpus: 1.0
@@ -55,4 +57,4 @@ services:
     restart: "on-failure:3"
 volumes:
   redis-data:
-  minio-data:
+  seaweed-data:
