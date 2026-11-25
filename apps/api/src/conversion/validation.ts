@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { BadRequestException } from '@nestjs/common'
 import { ACCEPTED_FORMATS, getFormatFromFilename, isConversionSupported, MAX_UPLOAD_BYTES } from '../../../../packages/shared/src/compatibility'
 import type { ModelFormat } from '../../../../packages/shared/src/compatibility'
@@ -29,5 +30,5 @@ export function validateUpload(body: unknown): UploadRequest {
 }
 
 export function tokenHash(token: string): string {
-  return require('node:crypto').createHash('sha256').update(token).digest('hex') as string
+  return createHash('sha256').update(token).digest('hex')
 }

@@ -12,6 +12,10 @@ const headers = { Authorization: 'Bearer ' + session.token }
 try {
   const wrong = await fetch(base + '/jobs/' + session.id, { headers: { Authorization: 'Bearer ' + '0'.repeat(64) } })
   assert.equal(wrong.status, 404)
+  const early = await fetch(base + '/jobs/' + session.id + '/submit', { method: 'POST', headers })
+  assert.equal(early.status, 409, 'submission must require completed upload')
+  const wrongLength = await fetch(session.uploadUrl, { method: 'PUT', headers: session.uploadHeaders, body: new Blob(['too short']) })
+  assert.ok(!wrongLength.ok, 'signed length must reject mismatched size')
   const put = await fetch(session.uploadUrl, { method: 'PUT', headers: session.uploadHeaders, body: file })
   assert.ok(put.ok, 'signed upload failed: ' + put.status)
   const repeat = await fetch(session.uploadUrl, { method: 'PUT', headers: session.uploadHeaders, body: file })
@@ -24,7 +28,7 @@ try {
   assert.equal(status.etaSeconds, null)
   const cancelled = await api('/jobs/' + session.id, { method: 'DELETE', headers })
   assert.equal(cancelled.status, 'cancelled')
-  console.log('PASS: direct upload, overwrite prevention, token isolation, idempotent submission, waiting status, cancellation')
+  console.log('PASS: direct upload, size enforcement, overwrite prevention, token isolation, idempotent submission, waiting status, cancellation')
 } finally {
   await fetch(base + '/jobs/' + session.id, { method: 'DELETE', headers }).catch(() => {})
 }

@@ -16,9 +16,11 @@ Node.js 22.12+, Docker Compose.
 
 ```sh
 npm run setup
-cp .env.example .env
+cp -n .env.example .env
 npm run infra:up
 ```
+
+If you already have a .env from Phase 1, add the new variables from .env.example rather than overwriting it.
 
 In separate terminals:
 

@@ -150,11 +150,16 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       }
       // Extend cleanup deadline before publishing; retry with the same job id is idempotent.
       await redis.zadd(due, s.expiresAt, id)
-      await queue.add('convert', {
+      try { await queue.add('convert', {
         inputKey: s.inputKey, outputKey: s.outputKey, inputFormat: s.inputFormat, outputFormat: s.outputFormat,
         originalBytes: s.originalBytes, compression: s.compression, color: s.color,
         etag: object.ETag, expiresAt: s.expiresAt,
-      }, { jobId: id })
+      }, { jobId: id }) } catch (error) {
+        // Revisit quickly even if Redis accepted the job before the connection failed.
+        // The sweeper checks actual BullMQ state before deleting any input.
+        await redis.zadd(due, Math.max(Date.now() + 60000, s.uploadUntil + 60000), id).catch(() => undefined)
+        throw error
+      }
       return { id, status: 'waiting' }
     })
   }
