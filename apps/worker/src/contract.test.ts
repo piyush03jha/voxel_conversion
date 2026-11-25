@@ -1,6 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { optimizationArgs } from './process'
+import { ACCEPTED_FORMATS } from '../../../packages/shared/src/compatibility'
+import { previewKind, jobOutputKey } from '../../../packages/shared/src/preview'
 import { checkJob } from './contract'
 import { verifyGlb } from './storage'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -40,6 +42,11 @@ test('GLB verification rejects corrupt header', async () => {
 test('preview job uses dedicated GLB/PNG output key and fixed compression',()=>{
   const data={...good,purpose:'preview' as const,inputFormat:'PDF' as const,inputKey:'temporary/'+id+'/input.pdf',outputKey:'temporary/'+id+'/output.png'}
   assert.doesNotThrow(()=>checkJob(id,data,1000))
+  for(const inputFormat of ACCEPTED_FORMATS){
+    const candidate={...data,inputFormat,inputKey:'temporary/'+id+'/input.'+inputFormat.toLowerCase(),outputKey:jobOutputKey(id,inputFormat,'GLB','preview')}
+    assert.doesNotThrow(()=>checkJob(id,candidate,1000))
+    assert.equal(previewKind(inputFormat),inputFormat==='PDF'||inputFormat==='SVG'?'PNG':'GLB')
+  }
   assert.throws(()=>checkJob(id,{...data,outputKey:good.outputKey},1000))
   assert.throws(()=>checkJob(id,{...data,compression:'Low'},1000))
 })

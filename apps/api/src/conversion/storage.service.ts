@@ -58,10 +58,10 @@ export class StorageService implements OnModuleDestroy {
     const { client, Bucket } = this.ready()
     await client.send(new CopyObjectCommand({ Bucket, Key: target, CopySource: encodeURIComponent(Bucket) + '/' + source.split('/').map(encodeURIComponent).join('/'), CopySourceIfMatch: etag }), { abortSignal: AbortSignal.timeout(60000) })
   }
-  async signDownload(key: string, expiresIn: number, format: ModelFormat | 'PNG') {
+  async signDownload(key: string, expiresIn: number, format: ModelFormat | 'PNG', preview = false) {
     const { client, Bucket } = this.ready()
     return getSignedUrl(client, new GetObjectCommand({
-      Bucket, Key: key, ResponseContentDisposition: 'attachment; filename="' + (format === 'PNG' ? 'preview.' : 'converted.') + format.toLowerCase() + '"', ResponseContentType: 'application/octet-stream',
+      Bucket, Key: key, ResponseContentDisposition: 'attachment; filename="' + (preview ? 'preview.' : 'converted.') + format.toLowerCase() + '"', ResponseContentType: 'application/octet-stream',
     }), { expiresIn })
   }
   onModuleDestroy() { this.client?.destroy() }

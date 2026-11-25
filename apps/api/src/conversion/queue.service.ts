@@ -217,7 +217,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const etaSeconds = position === null ? null : await this.waitingEstimate(position)
     const outputBytes = state === 'completed' && Number.isSafeInteger(job.returnvalue?.outputBytes) && job.returnvalue.outputBytes > 0 ? job.returnvalue.outputBytes : null
     const convertedBytes = state === 'completed' && Number.isSafeInteger(job.returnvalue?.convertedBytes) && job.returnvalue.convertedBytes > 0 ? job.returnvalue.convertedBytes : null
-    return { id, status: state, outputFormat: s.outputFormat, previewKind: s.purpose === 'preview' ? previewKind(s.inputFormat) : null, position, etaSeconds, convertedBytes, compressionApplied: state === 'completed' ? job.returnvalue?.compressionApplied ?? false : null, warning: state === 'completed' ? job.returnvalue?.warning ?? null : null, compressionReductionPercent: outputBytes !== null && convertedBytes !== null ? Math.round((1 - outputBytes / convertedBytes) * 10000) / 100 : null, error: state === 'failed' ? 'Conversion failed. Check the input file, missing dependencies or model complexity.' : null, progress: typeof job.progress === 'number' ? job.progress : null, originalBytes: s.originalBytes, outputBytes, reductionPercent: outputBytes === null ? null : Math.round((1 - outputBytes / s.originalBytes) * 10000) / 100 }
+    return { id, status: state, outputFormat: s.outputFormat, previewKind: s.purpose === 'preview' ? previewKind(s.inputFormat) : null, position, etaSeconds, convertedBytes, compressionApplied: state === 'completed' ? job.returnvalue?.compressionApplied ?? false : null, warning: state === 'completed' ? job.returnvalue?.warning ?? null : null, compressionReductionPercent: outputBytes !== null && convertedBytes !== null ? Math.round((1 - outputBytes / convertedBytes) * 10000) / 100 : null, error: state === 'failed' ? (s.purpose === 'preview' ? 'Preview failed. The model may be unsupported or too complex.' : 'Conversion failed. Check the input file, missing dependencies or model complexity.') : null, progress: typeof job.progress === 'number' ? job.progress : null, originalBytes: s.originalBytes, outputBytes, reductionPercent: outputBytes === null ? null : Math.round((1 - outputBytes / s.originalBytes) * 10000) / 100 }
   }
   async cancel(id: string, authorization?: string) {
     await this.authorized(id, authorization)
@@ -228,7 +228,8 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       const job = await queue.getJob(id)
       if (job) {
         const state = await job.getState()
-        if (!['waiting', 'delayed', 'paused', 'prioritized'].includes(state)) throw new ConflictException('Only waiting jobs can be cancelled in this phase')
+        const releasablePreview = s.purpose === 'preview' && ['completed', 'failed'].includes(state)
+        if (!releasablePreview && !['waiting', 'delayed', 'paused', 'prioritized'].includes(state)) throw new ConflictException('Only waiting jobs or finished preview jobs can be released')
         try { await job.remove() } catch { throw new ConflictException('Job already started; cancellation unavailable') }
       }
       // Do not delete the object before the signed PUT expires; otherwise it can be recreated.
@@ -268,7 +269,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const format = s.purpose === 'preview' ? previewKind(s.inputFormat) : s.outputFormat
     const seconds = Math.min(this.config.downloadSeconds, Math.floor((s.expiresAt - Date.now()) / 1000))
     if (seconds < 1) throw new ConflictException('Job expired')
-    return { url: await this.storage.signDownload(s.outputKey, seconds, format), filename: (s.purpose === 'preview' ? 'preview.' : 'converted.') + format.toLowerCase(), expiresIn: seconds }
+    return { url: await this.storage.signDownload(s.outputKey, seconds, format, s.purpose === 'preview'), filename: (s.purpose === 'preview' ? 'preview.' : 'converted.') + format.toLowerCase(), expiresIn: seconds }
   }
   private startSweep() {
     if (this.closing || this.sweepTask || !this.storage.configured) return

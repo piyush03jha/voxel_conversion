@@ -97,7 +97,7 @@ export default function ModelPreview({file,result,busy,serverReady}:{file:File|n
           if(!job.outputBytes||!job.previewKind)throw new Error('Invalid preview response')
           update({stage:'Loading generated preview…'})
           const blob=await api.fetchPreview(session,job.outputBytes,signal)
-          const preview:Preview=job.previewKind==='PNG'?{kind:'PNG',blob}:{kind:'GLB',file:new File([blob],'preview.glb')}
+          const preview:Preview=job.previewKind==='PNG'?{kind:'PNG',blob:new Blob([blob],{type:'image/png'})}:{kind:'GLB',file:new File([blob],'preview.glb')}
           update({stage:'Preview ready',preview});return
         }
         if(['failed','expired','cancelled'].includes(job.status))throw new Error('Preview '+job.status+'. The model may be unsupported or too complex.')
@@ -115,7 +115,7 @@ export default function ModelPreview({file,result,busy,serverReady}:{file:File|n
   const generated=current?.preview
   const previewFile=busy?null:generated?.kind==='GLB'?generated.file:local?(source??(localFile && localFile.result===result?localFile.file:null)):null
   const raster=!busy&&generated?.kind==='PNG'?generated.blob:null
-  const message=busy?'Preview paused during processing.':running===selected?current?.stage??'Generating preview…':current?.error??(generated?'':selected==='output'&&local&&localError!==result&&!previewFile?'Loading output preview…':name&&!previewFile&&!raster?'Generate a server preview for this format or model.':'')
+  const message=busy?'Preview paused during processing.':running===selected?current?.stage??'Generating preview…':(current?.error&&!previewFile?current.error:undefined)??(generated?'':selected==='output'&&local&&localError!==result&&!previewFile?'Loading output preview…':name&&!previewFile&&!raster?'Generate a server preview for this format or model.':'')
   const canGenerate=!!name&&!!size&&size<=MAX_UPLOAD_BYTES&&serverReady&&!busy&&!running
   return <>
     {raster?<RasterPreview blob={raster}/>:message?<div className="scene-loading preview-message" role="status">{message}</div>:<SampleViewport file={previewFile}/>}
@@ -127,6 +127,7 @@ export default function ModelPreview({file,result,busy,serverReady}:{file:File|n
     {name&&!busy&&<div className="preview-tools">
       {running?<button type="button" onClick={stop}>Stop preview</button>:!generated&&<button type="button" disabled={!canGenerate} onClick={()=>void generate()}>{selected==='output'&&result?.session?'Generate server preview from stored output':'Upload & generate server preview'}</button>}
       {!serverReady&&!local&&<small>Server preview requires an online worker.</small>}
+      {current?.error&&previewFile&&<small role="status">{current.error}</small>}
     </div>}
     {!raster&&<><span className="axis-label axis-x">X</span><span className="axis-label axis-y">Y</span><span className="axis-label axis-z">Z</span></>}
     <div className="preview-footer"><span>{raster?'Raster preview · first page for PDF':previewFile?'Static geometry · materials and animation not shown':name?'Preview does not change the exported file':'Sample geometry · select a model'}</span><span>{raster?'2D VIEW':'GL VIEWPORT'}</span></div>

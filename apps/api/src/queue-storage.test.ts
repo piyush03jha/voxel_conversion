@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { validateUpload, tokenHash } from './conversion/validation'
 import { StorageService } from './conversion/storage.service'
-import { MAX_UPLOAD_BYTES } from '../../../packages/shared/src/compatibility'
+import { ACCEPTED_FORMATS, MAX_UPLOAD_BYTES } from '../../../packages/shared/src/compatibility'
 
 const good = { filename: 'model.stl', size: 100, outputFormat: 'GLB' }
 test('metadata validation defaults and maximum size', () => {
@@ -32,7 +32,7 @@ test('presigned upload requires length, content type and conditional write', asy
 })
 
 test('preview requests are isolated and have fixed options', () => {
-  assert.equal(validateUpload({ ...good, filename:'drawing.pdf', purpose:'preview' }).purpose,'preview')
+  for (const format of ACCEPTED_FORMATS) assert.equal(validateUpload({ ...good, filename:'model.'+format.toLowerCase(), purpose:'preview' }).purpose,'preview')
   assert.throws(()=>validateUpload({...good,purpose:'preview',compression:'High'}))
   assert.throws(()=>validateUpload({...good,purpose:'preview',outputFormat:'STL'}))
   assert.throws(()=>validateUpload({...good,purpose:'unknown'}))
