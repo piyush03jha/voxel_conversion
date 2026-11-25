@@ -18,6 +18,14 @@ export default function ThreeScene({ file, color }: { file: File | null; color?:
         if (!file || file.size === 0 || file.size > 10 * 1024 * 1024) throw new Error('Preview size limit exceeded')
         const bytes = await file.arrayBuffer()
         if (cancelled) return
+        // STLLoader trusts the binary triangle count when allocating arrays.
+        // Reject truncated or forged binary headers before passing them to the loader.
+        const header = new Uint8Array(bytes, 0, Math.min(bytes.byteLength, 9))
+        const solid = [115, 111, 108, 105, 100]
+        const ascii = [0, 1, 2, 3, 4].some((offset) => solid.every((value, index) => header[offset + index] === value))
+        const exactBinary = bytes.byteLength >= 84 &&
+          84 + new DataView(bytes).getUint32(80, true) * 50 === bytes.byteLength
+        if (!exactBinary && (!ascii || bytes.byteLength < 84)) throw new Error('Invalid STL header')
         geometry = new STLLoader().parse(bytes)
         const positions = geometry.getAttribute('position')
         if (!positions || positions.count < 3) throw new Error('No mesh geometry')
