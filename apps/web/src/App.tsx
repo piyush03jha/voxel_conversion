@@ -10,11 +10,10 @@ import {
 import { browserRoute } from './features/converter/browser-route'
 import { health } from './features/converter/conversion-client'
 import { useConversion } from './features/converter/use-conversion'
-import SampleViewport from './features/converter/SampleViewport'
+import ModelPreview from './features/converter/ModelPreview'
 import './App.css'
 
 const COMPRESSION_LEVELS = ['None', 'Low', 'Medium', 'High'] as const
-const STL_PREVIEW_LIMIT = 10 * 1024 * 1024
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
@@ -56,7 +55,6 @@ function App() {
   const selectedOutput = outputs.find((format) => format === outputFormat) ?? outputs[0] ?? 'GLB'
   const compressionLevels = getCompressionLevels(selectedOutput)
   const outputWarning = getOutputWarning(selectedOutput)
-  const localPreview = inputFormat === 'STL' && file !== null && file.size <= STL_PREVIEW_LIMIT && !job.busy
 
   const local = !!file && !!inputFormat && browserRoute(inputFormat, selectedOutput, file.size, compression)
   const route = local ? 'browser' : 'server'
@@ -198,12 +196,7 @@ function App() {
           </div>
           <div className="preview-window">
             <div className="preview-grid" aria-hidden="true" />
-            <SampleViewport file={localPreview ? file : null} />
-            <div className="preview-label"><span className="live-dot" /> {localPreview ? 'LOCAL STL PREVIEW' : 'INTERACTIVE SAMPLE SCENE'}</div>
-            <span className="axis-label axis-x">X</span>
-            <span className="axis-label axis-y">Y</span>
-            <span className="axis-label axis-z">Z</span>
-            <div className="preview-footer"><span>{localPreview ? 'Local STL preview · no upload' : file ? 'Sample only · this file requires server preview or exceeds the 10 MiB preview limit' : 'Sample geometry · select an STL to preview locally'}</span><span>GL VIEWPORT</span></div>
+            <ModelPreview key={file ? file.name + ':' + file.size + ':' + file.lastModified : 'empty'} file={file} result={job.result} busy={job.busy} />
           </div>
         </div>
 
@@ -256,7 +249,7 @@ function App() {
             <div className="queue-top"><span className="queue-dot" /> {job.route ? job.route === 'browser' ? 'BROWSER PROCESSING' : 'SERVER PROCESSING' : !file ? 'SELECT A FILE' : local ? 'BROWSER FIRST' : 'SERVER REQUIRED'}</div>
             <p>{job.busy || job.result || job.error ? job.stage : !file ? 'The converter selects the processing engine automatically.' : local ? 'Eligible for local conversion. Your file will not be uploaded; unsupported content requires explicit server fallback.' : serverReady ? 'This file or setting requires the server. Convert will upload to private temporary storage.' : 'This conversion requires the server, which is currently unavailable.'}</p>
             {job.progress !== null && <progress className="job-progress" value={job.progress} max={100} aria-label="Conversion stage progress" />}
-            <div className="queue-meta"><span>QUEUE <b>{job.position ?? '—'}</b></span><span>ETA <b>{job.eta === null ? '—' : Math.ceil(job.eta / 60) + ' min'}</b></span></div>
+            <div className="queue-meta"><span>QUEUE <b>{job.position ?? '—'}</b></span><span>EST. WAIT <b>{job.eta === null ? '—' : job.eta < 60 ? job.eta + ' sec' : Math.ceil(job.eta / 60) + ' min'}</b></span></div>
             {job.result?.convertedBytes != null && job.result.convertedBytes > 0 && job.route === 'server' && <p>Before compression: {formatBytes(job.result.convertedBytes)} · reduction: {((1 - job.result.bytes / job.result.convertedBytes) * 100).toFixed(1)}%</p>}
             {job.result?.warning && <p className="job-warning">{job.result.warning}</p>}
             {job.error && <p className="error-message" role="alert">{job.error}</p>}
@@ -266,8 +259,9 @@ function App() {
             <span>{job.busy ? job.stage : !file ? 'Add a file to continue' : local ? 'Convert in browser' : 'Convert on server'}</span>
             <span aria-hidden="true">↗</span>
           </button>
-          {job.busy && <button className="job-action" type="button" onClick={() => void cancelCurrent()}>Cancel</button>}
+          {job.busy && job.stage !== 'Converting on server' && <button className="job-action" type="button" onClick={() => void cancelCurrent()}>Cancel</button>}
           {job.fallback && !job.busy && <button className="job-action" type="button" disabled={!serverReady} onClick={() => begin(true)}>Upload and convert on server instead</button>}
+          {job.busy && job.stage === 'Converting on server' && <p className="privacy-note">Active server conversions cannot be cancelled yet.</p>}
           {job.result && <button className="job-action download-action" type="button" disabled={downloading} onClick={() => void downloadResult()}>{downloading ? 'Preparing download…' : 'Download ' + selectedOutput}</button>}
           {downloadError && <p className="error-message" role="alert">{downloadError}</p>}
           <p className="privacy-note"><span aria-hidden="true">⌑</span> {job.route === 'browser' || (!job.route && local) ? 'Local conversion: no model upload' : 'Server files are temporary; downloads expire'}</p>

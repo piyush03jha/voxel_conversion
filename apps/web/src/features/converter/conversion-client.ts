@@ -49,3 +49,25 @@ export function wait(ms:number,signal:AbortSignal) {
     signal.addEventListener('abort',abort,{once:true})
   })
 }
+
+export async function fetchPreview(session:Session,expectedBytes:number,signal:AbortSignal):Promise<Blob>{
+  const max=10*1024*1024
+  if(!Number.isSafeInteger(expectedBytes)||expectedBytes<1||expectedBytes>max)throw new Error('Preview size limit')
+  const signed=await request<{url:string}>(jobPath(session)+'/download',{headers:auth(session),signal})
+  const response=await fetch(signed.url,{signal:AbortSignal.any([signal,AbortSignal.timeout(30000)]),credentials:'omit',cache:'no-store',referrerPolicy:'no-referrer'})
+  if(!response.ok||!response.body)throw new Error('Preview download unavailable')
+  const reader=response.body.getReader()
+  const chunks:Uint8Array<ArrayBuffer>[]=[]
+  let total=0
+  try{
+    while(true){
+      const {done,value}=await reader.read()
+      if(done)break
+      total+=value.byteLength
+      if(total>expectedBytes||total>max)throw new Error('Preview size limit')
+      chunks.push(new Uint8Array(value))
+    }
+    if(total!==expectedBytes)throw new Error('Preview size mismatch')
+    return new Blob(chunks)
+  }finally{await reader.cancel().catch(()=>undefined);reader.releaseLock()}
+}

@@ -6,7 +6,7 @@ import * as api from './conversion-client'
 import type { Session, JobStatus } from './conversion-client'
 
 type Route = 'browser' | 'server'
-type Result = { name:string; bytes:number; originalBytes:number; convertedBytes:number|null; warning:string|null; blob?:Blob; session?:Session }
+export type Result = { name:string; bytes:number; originalBytes:number; convertedBytes:number|null; warning:string|null; blob?:Blob; session?:Session }
 type State = { busy:boolean; stage:string; progress:number|null; position:number|null; eta:number|null; route:Route|null; error:string|null; fallback:boolean; result:Result|null }
 const empty:State={busy:false,stage:'Ready',progress:null,position:null,eta:null,route:null,error:null,fallback:false,result:null}
 type Run = { controller:AbortController; session?:Session; submitted:boolean; submissionStarted:boolean; cancelling:boolean; cancelled:boolean }
@@ -51,7 +51,7 @@ export function useConversion(){
           try{job=await api.status(session,signal);failures=0}catch(error){if(++failures>=5)throw error;await api.wait(2500,signal);continue}
           if(job.status==='completed'){
             if(typeof job.outputBytes!=='number'||job.outputBytes<=0)throw new Error('Server did not return a valid output size.')
-            patch(run,{stage:'Completed on server',progress:100,position:null,eta:null,result:{name,bytes:job.outputBytes,originalBytes:file.size,convertedBytes:job.convertedBytes??null,warning:job.warning??null,session}})
+            patch(run,{stage:'Completed on server',progress:100,position:null,eta:null,error:null,result:{name,bytes:job.outputBytes,originalBytes:file.size,convertedBytes:job.convertedBytes??null,warning:job.warning??null,session}})
             break
           }
           if(terminal.includes(job.status))throw new Error(job.status==='cancelled'?'Job cancelled.':job.error??'Conversion '+job.status+'.')
@@ -88,7 +88,7 @@ export function useConversion(){
     try{
       const link=document.createElement('a')
       if(result.blob){objectUrl=URL.createObjectURL(result.blob);link.href=objectUrl;link.download=result.name}
-      else if(result.session){const signed=await api.download(result.session);link.href=signed.url;link.download=signed.filename;link.rel='noreferrer'}
+      else if(result.session){const signed=await api.download(result.session);link.href=signed.url;link.download=signed.filename;link.rel='noreferrer';link.referrerPolicy='no-referrer'}
       else throw new Error('Output unavailable.')
       document.body.append(link);link.click();link.remove()
     }catch(error){setDownloadError(error instanceof Error?error.message:'Download failed.')}

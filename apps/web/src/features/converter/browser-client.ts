@@ -1,6 +1,6 @@
 import type { ModelFormat } from './compatibility'
 
-export function convertLocally(file: File, input: ModelFormat, output: ModelFormat, signal: AbortSignal): Promise<Blob> {
+export function convertLocally(file: File, input: ModelFormat, output: ModelFormat, signal: AbortSignal, preview = false): Promise<Blob> {
   return new Promise((resolve,reject)=>{
     if(signal.aborted){reject(new DOMException('Cancelled','AbortError'));return}
     const worker=new Worker(new URL('./browser-conversion.worker.ts',import.meta.url),{type:'module'})
@@ -13,6 +13,6 @@ export function convertLocally(file: File, input: ModelFormat, output: ModelForm
     signal.addEventListener('abort',abort,{once:true})
     worker.onmessage=(event:MessageEvent<{ok:boolean;blob?:Blob;error?:string}>)=>event.data.ok?finish(undefined,event.data.blob):finish(new Error(event.data.error??'Local conversion failed'))
     worker.onerror=()=>finish(new Error('Browser converter failed. Use server processing instead.'))
-    worker.postMessage({file,input,output})
+    worker.postMessage({file,input,output,preview})
   })
 }

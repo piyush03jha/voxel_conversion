@@ -157,3 +157,9 @@
 .download-action { background: #274639; color: var(--accent); }
 .job-progress { display: block; width: 100%; height: 7px; margin: 8px 0; accent-color: var(--accent); }
 .job-warning { color: #d6b97f !important; }
+
+.preview-message { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 32px; }
+.preview-switch { position: absolute; z-index: 3; top: 12px; right: 12px; display: flex; gap: 4px; }
+.preview-switch button { background: #172420; color: #a8b9b0; padding: 6px 10px; border: 1px solid #35443d; border-radius: 4px; font-size: 11px; cursor: pointer; }
+.preview-switch button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.preview-switch button:disabled { opacity: .45; cursor: not-allowed; }
