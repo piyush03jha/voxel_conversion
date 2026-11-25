@@ -23,9 +23,7 @@ function App() {
   const [file, setFile] = useState<File | null>(null)
   const [fileError, setFileError] = useState('')
   const [isDragging, setIsDragging] = useState(false)
-  const [compression, setCompression] = useState<(typeof COMPRESSION_LEVELS)[number]>('Medium')
-  const [color, setColor] = useState('#8ce5c5')
-  const [customColor, setCustomColor] = useState(false)
+  const [compression, setCompression] = useState<(typeof COMPRESSION_LEVELS)[number]>('None')
   const [outputFormat, setOutputFormat] = useState('GLB')
   const [apiOnline, setApiOnline] = useState(false)
 
@@ -42,7 +40,6 @@ function App() {
   const outputs = inputFormat ? getSupportedOutputs(inputFormat) : []
   const selectedOutput = outputs.find((format) => format === outputFormat) ?? outputs[0] ?? 'GLB'
   const localPreview = inputFormat === 'STL' && file !== null && file.size <= STL_PREVIEW_LIMIT
-  const isColorValid = /^#[0-9a-f]{6}$/i.test(color)
 
   function selectFile(candidate?: File) {
     if (!candidate) return
@@ -82,7 +79,7 @@ function App() {
           <span>formshift</span>
         </a>
         <div className="topbar-right">
-          <span className="service-indicator"><i /> {apiOnline ? 'API online · worker pending' : 'Local preview'}</span>
+          <span className="service-indicator"><i /> {apiOnline ? 'API online · upload UI pending' : 'Local preview'}</span>
           <a className="github-link" href="https://github.com/piyush03jha/voxel_conversion" target="_blank" rel="noreferrer">
             About the project <span aria-hidden="true">↗</span>
           </a>
@@ -161,7 +158,7 @@ function App() {
               <div className="format-value"><select aria-label="Output format" value={selectedOutput} disabled={!outputs.length} onChange={(event) => setOutputFormat(event.target.value)}>{(outputs.length ? outputs : ['GLB']).map((format) => <option key={format} value={format}>{format}</option>)}</select><span>Planned export</span></div>
             </div>
           </div>
-          <p className="format-footnote">GLB is the initial planned export. Conversion is not available until the worker is connected.</p>
+          <p className="format-footnote">GLB is the only export for now. API conversion is implemented; browser submission is a later milestone.</p>
 
           <div className="preview-heading">
             <div>
@@ -172,7 +169,7 @@ function App() {
           </div>
           <div className="preview-window">
             <div className="preview-grid" aria-hidden="true" />
-            <SampleViewport file={localPreview ? file : null} color={customColor && isColorValid ? color : undefined} />
+            <SampleViewport file={localPreview ? file : null} />
             <div className="preview-label"><span className="live-dot" /> {localPreview ? 'LOCAL STL PREVIEW' : 'INTERACTIVE SAMPLE SCENE'}</div>
             <span className="axis-label axis-x">X</span>
             <span className="axis-label axis-y">Y</span>
@@ -192,7 +189,7 @@ function App() {
 
           <div className="setting-block">
             <div className="setting-heading"><span>Compression</span><span>GLB</span></div>
-            <p>Reduce file size while keeping your model useful.</p>
+            <p>None skips optimization. Low/Medium optimize meshes and textures; High may also simplify static geometry.</p>
             <div className="compression-options" id="compression" role="group" aria-label="Compression level">
               {COMPRESSION_LEVELS.map((level) => (
                 <button
@@ -210,17 +207,8 @@ function App() {
           <div className="setting-divider" />
 
           <div className="setting-block color-block">
-            <div className="setting-heading"><label htmlFor="color-hex">Model color</label><span>OPTIONAL</span></div>
-            <p>Preserve the original materials, or choose a custom export color.</p>
-            <label className="color-toggle"><input type="checkbox" checked={customColor} onChange={(event) => setCustomColor(event.target.checked)} /> Use custom color</label>
-            <div className="color-control">
-              <label className="color-swatch" htmlFor="model-color" style={{ backgroundColor: isColorValid ? color : '#8ce5c5' }}>
-                <input id="model-color" type="color" disabled={!customColor} value={isColorValid ? color : '#8ce5c5'} onChange={(event) => setColor(event.target.value)} aria-label="Choose model color" />
-              </label>
-              <input id="color-hex" className="hex-input" disabled={!customColor} value={color} maxLength={7} onChange={(event) => setColor(event.target.value)} aria-label="Model color HEX value" aria-invalid={customColor && !isColorValid} />
-              <span className={!customColor || isColorValid ? 'color-check' : 'color-check invalid'} aria-hidden="true">{!customColor ? '—' : isColorValid ? '✓' : '!'}</span>
-            </div>
-            <span className="setting-note">{customColor && !isColorValid ? 'Enter a valid six-digit HEX color.' : customColor ? 'Preview color only; exported color support is pending.' : 'Original materials will be preserved when export is implemented.'}</span>
+            <div className="setting-heading"><span>Model color</span><span>PAUSED</span></div>
+            <p>Custom color is postponed. No color override will be applied.</p>
           </div>
 
           <div className="setting-divider" />
@@ -235,13 +223,13 @@ function App() {
           </div>
 
           <div className="queue-card">
-            <div className="queue-top"><span className="queue-dot" /> {apiOnline ? 'API ONLINE · QUEUE PENDING' : 'SERVICE NOT CONNECTED'}</div>
+            <div className="queue-top"><span className="queue-dot" /> {apiOnline ? 'API ONLINE · UPLOAD UI PENDING' : 'SERVICE NOT CONNECTED'}</div>
             <p>Queue position and wait time will show here when the conversion API is online.</p>
             <div className="queue-meta"><span>QUEUE <b>—</b></span><span>ETA <b>—</b></span></div>
           </div>
 
           <button className="convert-button" type="button" disabled>
-            <span>{file ? 'Conversion service coming soon' : 'Add a file to continue'}</span>
+            <span>{file ? 'Browser submission coming soon' : 'Add a file to continue'}</span>
             <span aria-hidden="true">↗</span>
           </button>
           <p className="privacy-note"><span aria-hidden="true">⌑</span> Files are local for now; temporary storage is planned</p>

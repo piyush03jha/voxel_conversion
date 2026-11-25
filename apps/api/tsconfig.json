@@ -10,10 +10,23 @@
     "emitDecoratorMetadata": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "bullmq": [
+        "node_modules/bullmq"
+      ],
+      "ioredis": [
+        "node_modules/ioredis"
+      ],
+      "@aws-sdk/client-s3": [
+        "node_modules/@aws-sdk/client-s3"
+      ]
+    }
   },
   "include": [
     "src/**/*.ts",
-    "../../packages/shared/src/**/*.ts"
+    "../../packages/shared/src/**/*.ts",
+    "../worker/src/**/*.ts"
   ]
 }

@@ -4,7 +4,7 @@
 
 1. Use Node 22.12+ and Docker Compose. Run npm run setup (updates apps/api/package-lock.json for the new dependencies; commit it before deployment).
 2. Copy .env.example to .env. Run npm run infra:up and check docker compose logs minio-init. Bucket formshift-temp is private; do not make it public.
-3. For an isolated smoke test only, change QUEUE_ACCEPT_JOBS=true in .env. Run npm run dev:api. Run npm run smoke:queue in another terminal. No worker should be running.
+3. For an isolated smoke test only, change QUEUE_ACCEPT_JOBS=true in .env. Run npm run dev:api. Run npm run smoke:queue in another terminal. No worker should be running. Set QUEUE_TEST_MODE=true as well; Phase 3 otherwise requires a worker heartbeat. The current worker supports all existing ADVFX inputs to GLB and optional compression; see phase-3.md and phase-5.md. Queue-only mode is blocked when NODE_ENV=production.
 4. Run npm test, npm run build, npm run lint. Reset QUEUE_ACCEPT_JOBS=false before public use.
 
 Local MinIO console: http://127.0.0.1:9001. The sample credentials and latest MinIO tags are for local development only. Redis is bound to loopback, uses noeviction and a persistent volume. Never expose Redis publicly.
@@ -31,6 +31,6 @@ Default upload URL: 15 minutes. Job lifetime: 24 hours from session creation. Ex
 - Provision a private R2 bucket and bucket-scoped read/write token. Set STORAGE_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com, STORAGE_REGION=auto, STORAGE_FORCE_PATH_STYLE=true, bucket and credentials in Railway variables. Do not use public R2 URLs or commit secrets. Set HOST=0.0.0.0 in Railway.
 - Set bucket CORS to the exact deployed web origin, allow PUT and Content-Type/If-None-Match headers; configure lifecycle expiry on temporary/ after 2 days. Confirm signed uploads with the actual browser and provider before enabling.
 - Use a private Railway Redis URL with noeviction and sufficient RAM/persistence. Use HTTPS for API and storage. Add edge per-IP rate limits and abuse protection before making uploads public; global admission/rate limits alone do not prevent denial of service.
-- Keep QUEUE_ACCEPT_JOBS=false until the real worker, content validation, resource limits, and integration tests are ready. Phase 2 intentionally has no public upload UI.
+- Keep QUEUE_ACCEPT_JOBS=false until the real worker, content validation, resource limits, and integration tests are ready. The public upload UI remains disabled; see phase-3.md for worker integration.
 
 Known limitations: no actual conversion, no running worker, no active-job cancellation, no measured ETA, no verified production provider/deployment. Signed upload length enforcement, conditional writes, cleanup under concurrency and 200 MiB resource behavior require live integration tests. The API lockfile needs regeneration; install and commit it before deploying.
