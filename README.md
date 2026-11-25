@@ -38,3 +38,7 @@ npm run lint
 ```
 
 The API lockfile must be refreshed by npm run setup and committed before deploying. The existing frontend lockfile is unchanged. See docs/phase-2.md for exact storage setup and limitations. The original 15 formats are represented as input/output targets through 188 candidate pairs; runtime verification is pending. See docs/phase-4a.md for limitations and per-format smoke testing. New formats, custom color, real ETA and frontend submission remain deferred. Public admission requires explicit approval and a working sandbox. See docs/phase-3.md and docs/phase-5.md.
+
+## Hybrid browser-first processing
+
+See [browser-first routing and frontend integration](docs/browser-first.md). Eligible geometry and glTF repacking jobs execute locally; other conversions use the server. Run npm run test:browser for the codec regression suite. Runtime verification remains required.

@@ -9,7 +9,7 @@ type Route = 'browser' | 'server'
 type Result = { name:string; bytes:number; originalBytes:number; convertedBytes:number|null; warning:string|null; blob?:Blob; session?:Session }
 type State = { busy:boolean; stage:string; progress:number|null; position:number|null; eta:number|null; route:Route|null; error:string|null; fallback:boolean; result:Result|null }
 const empty:State={busy:false,stage:'Ready',progress:null,position:null,eta:null,route:null,error:null,fallback:false,result:null}
-type Run = { controller:AbortController; session?:Session; submitted:boolean; cancelling:boolean; cancelled:boolean }
+type Run = { controller:AbortController; session?:Session; submitted:boolean; submissionStarted:boolean; cancelling:boolean; cancelled:boolean }
 const terminal = ['completed','failed','expired','cancelled']
 export function useConversion(){
   const [state,setState]=useState<State>(empty)
@@ -22,7 +22,7 @@ export function useConversion(){
   function reset(){if(!active.current){setState(empty);setDownloadError('')}}
   async function start(file:File,input:ModelFormat,output:ModelFormat,compression:CompressionLevel,route:Route){
     if(active.current)return
-    const run:Run={controller:new AbortController(),submitted:false,cancelling:false,cancelled:false}
+    const run:Run={controller:new AbortController(),submitted:false,submissionStarted:false,cancelling:false,cancelled:false}
     active.current=run
     const signal=run.controller.signal
     setDownloadError('')
@@ -31,7 +31,7 @@ export function useConversion(){
       const name=outputName(file.name,output)
       if(route==='browser'){
         const blob=await convertLocally(file,input,output,signal)
-        patch(run,{stage:'Completed locally',progress:100,result:{name,bytes:blob.size,originalBytes:file.size,convertedBytes:blob.size,warning:null,blob}})
+        patch(run,{stage:'Completed locally',progress:100,result:{name,bytes:blob.size,originalBytes:file.size,convertedBytes:blob.size,warning:input==='GLB'||input==='GLTF'?null:'Geometry-only browser export. Original normals, smoothing groups and advanced scene features are not retained.',blob}})
       }else{
         const session=await api.createSession(file,output,compression,signal)
         run.session=session
@@ -40,6 +40,7 @@ export function useConversion(){
         await api.upload(session,file,signal,percent=>patch(run,{progress:percent}))
         patch(run,{stage:'Submitting job',progress:null})
         // Retry submit once on uncertain network failure; server job id is idempotent.
+        run.submissionStarted=true
         try{await api.submit(session,signal)}catch(error){signal.throwIfAborted();await api.submit(session,signal).catch(()=>{throw error})}
         run.submitted=true
         let failures=0
@@ -61,14 +62,14 @@ export function useConversion(){
     }catch(error){
       if(run.session&&!run.submitted)void api.cancel(run.session).catch(()=>undefined)
       if(run.cancelled||signal.aborted)patch(run,{stage:'Cancelled',error:null})
-      else patch(run,{stage:'Conversion not completed',error:error instanceof Error?error.message:'Conversion failed.',fallback:route==='browser'})
+      else patch(run,{stage:'Conversion not completed',error:(error instanceof Error?error.message:'Conversion failed.')+(run.submissionStarted?' A server job may still exist if its status could not be retrieved; it expires automatically.':''),fallback:route==='browser'})
     }finally{patch(run,{busy:false});if(active.current===run)active.current=null}
   }
   async function cancelCurrent(){
     const run=active.current
     if(!run||run.cancelling)return
     run.cancelling=true
-    if(run.session&&run.submitted){
+    if(run.session&&run.submissionStarted){
       try{
         await api.cancel(run.session)
         run.cancelled=true;run.controller.abort()

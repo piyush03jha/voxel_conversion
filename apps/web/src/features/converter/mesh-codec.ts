@@ -22,10 +22,17 @@ function triangle(mesh: Mesh, a: number, b: number, c: number) {
   if (mesh.indices.length / 3 >= LOCAL_MAX_TRIANGLES || ![a,b,c].every(i => Number.isInteger(i) && i >= 0 && i < mesh.positions.length / 3)) fail()
   mesh.indices.push(a,b,c)
 }
-function lines(bytes: ArrayBuffer) {
+function* lines(bytes: ArrayBuffer | Uint8Array) {
   const text = decoder.decode(bytes)
   if (text.includes('\0')) fail()
-  return text.split(/\r?\n/)
+  let start=0
+  while(start<text.length) {
+    const newline=text.indexOf('\n',start)
+    const end=newline<0?text.length:newline
+    if(end-start>4096)fail()
+    yield text.slice(start,end)
+    start=end+1
+  }
 }
 function stl(bytes: ArrayBuffer): Mesh {
   const m: Mesh = { positions: [], indices: [] }
@@ -100,10 +107,16 @@ function ply(bytes: ArrayBuffer): Mesh {
     for(let i=0;i<nv;i++,pos+=12)vertex(m,d.getFloat32(pos,true),d.getFloat32(pos+4,true),d.getFloat32(pos+8,true),true)
     for(let i=0;i<nt;i++,pos+=13){if(d.getUint8(pos)!==3)fail();triangle(m,d.getUint32(pos+1,true),d.getUint32(pos+5,true),d.getUint32(pos+9,true))}
   } else {
-    const rows=decoder.decode(raw.subarray(end)).trim().split(/\r?\n/)
-    if(rows.length!==nv+nt)fail()
-    for(let i=0;i<nv;i++){const w=rows[i].trim().split(/\s+/);if(w.length!==3)fail();vertex(m,number(w[0]),number(w[1]),number(w[2]),true)}
-    for(let i=nv;i<rows.length;i++){const w=rows[i].trim().split(/\s+/);if(w.length!==4||w[0]!=='3'||!w.slice(1).every(x=>/^\d+$/.test(x)))fail();triangle(m,Number(w[1]),Number(w[2]),Number(w[3]))}
+    let row=0
+    for(const line of lines(raw.subarray(end))){
+      if(!line.trim())continue
+      const w=line.trim().split(/\s+/)
+      if(row>=nv+nt)fail()
+      if(row<nv){if(w.length!==3)fail();vertex(m,number(w[0]),number(w[1]),number(w[2]),true)}
+      else{if(w.length!==4||w[0]!=='3'||!w.slice(1).every(x=>/^\d+$/.test(x)))fail();triangle(m,Number(w[1]),Number(w[2]),Number(w[3]))}
+      row++
+    }
+    if(row!==nv+nt)fail()
   }
   return m
 }
@@ -147,13 +160,14 @@ function base64(bytes:Uint8Array) {
   return out
 }
 function checkDocument(doc:GltfDocument) {
-  if(!doc||doc.asset?.version!=='2.0'||!Array.isArray(doc.buffers)||doc.buffers.length!==1||
-     !Array.isArray(doc.meshes)||!doc.meshes.length||!Number.isSafeInteger(doc.buffers[0].byteLength)||doc.buffers[0].byteLength<1||
+  const buffer=doc?.buffers?.[0]
+  if(!doc||doc.asset?.version!=='2.0'||!Array.isArray(doc.buffers)||doc.buffers.length!==1||!buffer||
+     !Array.isArray(doc.meshes)||!doc.meshes.length||!Number.isSafeInteger(buffer.byteLength)||buffer.byteLength<1||buffer.byteLength>LOCAL_MAX_BYTES*2||
      (doc.images??[]).some(image=>image.uri!==undefined||!Number.isInteger(image.bufferView)))fail()
   // No external URIs in extensions or other nested objects. Only the single main buffer may have a data URI.
   const stack:unknown[]=[doc]
   while(stack.length){const v=stack.pop();if(v&&typeof v==='object')for(const [key,value] of Object.entries(v)){
-    if(key==='uri'&&v!==doc.buffers[0])fail()
+    if(key==='uri'&&v!==buffer)fail()
     if(value&&typeof value==='object')stack.push(value)
   }}
 }

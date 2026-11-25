@@ -56,7 +56,7 @@ function App() {
   const selectedOutput = outputs.find((format) => format === outputFormat) ?? outputs[0] ?? 'GLB'
   const compressionLevels = getCompressionLevels(selectedOutput)
   const outputWarning = getOutputWarning(selectedOutput)
-  const localPreview = inputFormat === 'STL' && file !== null && file.size <= STL_PREVIEW_LIMIT
+  const localPreview = inputFormat === 'STL' && file !== null && file.size <= STL_PREVIEW_LIMIT && !job.busy
 
   const local = !!file && !!inputFormat && browserRoute(inputFormat, selectedOutput, file.size, compression)
   const route = local ? 'browser' : 'server'
@@ -249,14 +249,15 @@ function App() {
               <div className="output-icon" aria-hidden="true">▧</div>
               <div><b>{file ? `${file.name.replace(/\.[^.]+$/, '')}.${selectedOutput.toLowerCase()}` : `Your model.${selectedOutput.toLowerCase()}`}</b><span>{job.result ? formatBytes(job.result.bytes) + ' processed · ' + formatBytes(job.result.originalBytes) + ' original' : file ? formatBytes(file.size) + ' before processing' : 'File size appears after selection'}</span></div>
             </div>
-            <div className="size-estimate"><span>Potential size reduction</span><b>{reduction === null ? 'Calculated after processing' : reduction >= 0 ? reduction.toFixed(1) + '% smaller' : (-reduction).toFixed(1) + '% larger'}</b></div>
+            <div className="size-estimate"><span>Overall size change</span><b>{reduction === null ? 'Calculated after processing' : reduction >= 0 ? reduction.toFixed(1) + '% smaller' : (-reduction).toFixed(1) + '% larger'}</b></div>
           </div>
 
           <div className="queue-card" aria-live="polite">
             <div className="queue-top"><span className="queue-dot" /> {job.route ? job.route === 'browser' ? 'BROWSER PROCESSING' : 'SERVER PROCESSING' : !file ? 'SELECT A FILE' : local ? 'BROWSER FIRST' : 'SERVER REQUIRED'}</div>
-            <p>{job.busy || job.result || job.error ? job.stage : !file ? 'The converter selects the processing engine automatically.' : local ? 'Eligible for local conversion. Your file will not be uploaded.' : serverReady ? 'This file or setting requires the server. Convert will upload to private temporary storage.' : 'This conversion requires the server, which is currently unavailable.'}</p>
+            <p>{job.busy || job.result || job.error ? job.stage : !file ? 'The converter selects the processing engine automatically.' : local ? 'Eligible for local conversion. Your file will not be uploaded; unsupported content requires explicit server fallback.' : serverReady ? 'This file or setting requires the server. Convert will upload to private temporary storage.' : 'This conversion requires the server, which is currently unavailable.'}</p>
             {job.progress !== null && <progress className="job-progress" value={job.progress} max={100} aria-label="Conversion stage progress" />}
             <div className="queue-meta"><span>QUEUE <b>{job.position ?? '—'}</b></span><span>ETA <b>{job.eta === null ? '—' : Math.ceil(job.eta / 60) + ' min'}</b></span></div>
+            {job.result?.convertedBytes != null && job.result.convertedBytes > 0 && job.route === 'server' && <p>Before compression: {formatBytes(job.result.convertedBytes)} · reduction: {((1 - job.result.bytes / job.result.convertedBytes) * 100).toFixed(1)}%</p>}
             {job.result?.warning && <p className="job-warning">{job.result.warning}</p>}
             {job.error && <p className="error-message" role="alert">{job.error}</p>}
           </div>

@@ -20,6 +20,7 @@
     "worker:up": "docker compose --profile worker up -d --build --scale worker=2 worker",
     "smoke:conversion": "npm run smoke:conversion --prefix apps/api",
     "test:native": "python3 apps/worker/scripts/test-native.py",
-    "test:export": "python3 apps/worker/scripts/test-export.py"
+    "test:export": "python3 apps/worker/scripts/test-export.py",
+    "test:browser": "npm run test:browser --prefix apps/web"
   }
 }
