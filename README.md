@@ -1,22 +1,23 @@
 # Formshift — 3D File Workshop
 
-Standalone 3D conversion and compression project. Phase 1 preserves the existing responsive frontend, adds a local STL preview (up to 10 MiB), and initializes a NestJS metadata API. Actual conversion is not implemented.
+Standalone 3D file converter. Phase 2 adds private temporary-storage upload sessions, Redis/BullMQ queue admission, job status/cancellation, and cleanup. No conversion worker is running; public job submission remains disabled.
 
 ## Layout
 
-- `apps/web`: React/Vite application (existing lockfile preserved).
-- `apps/api`: NestJS API.
-- `apps/worker`: future isolated Blender/Python conversion service.
-- `packages/shared`: shared format definitions and limits.
-- `docs`: architecture and next steps.
+- apps/web: existing React/Vite interface and bounded local STL preview.
+- apps/api: NestJS metadata, storage and queue API.
+- apps/worker: worker contract for the next phase.
+- packages/shared: format definitions and queue types.
+- docs/phase-2.md: API, security, deployment and smoke-test instructions.
 
-## Development
+## Local development
 
-Use Node.js 22.12+ (a supported LTS release is recommended). Each application has its own npm dependency installation to preserve the existing web lockfile and allow independent deployments.
+Node.js 22.12+, Docker Compose.
 
 ```sh
 npm run setup
 cp .env.example .env
+npm run infra:up
 ```
 
 In separate terminals:
@@ -26,17 +27,12 @@ npm run dev:web
 npm run dev:api
 ```
 
-Web: http://localhost:5173. API: http://localhost:3001/api/health and /api/formats. The Vite development proxy forwards /api to the default API port. If changing the API port, update the proxy or configure VITE_API_BASE_URL. The API's first install generates apps/api/package-lock.json; commit that lockfile before deploying.
+Web: http://localhost:5173. API: http://localhost:3001/api/health and /api/formats. For a local queue smoke test, set QUEUE_ACCEPT_JOBS=true before starting the API and run npm run smoke:queue. Reset to false for public deployments.
 
 ```sh
+npm test
 npm run build
 npm run lint
-npm test
 ```
 
-## Current limitations
-
-- Files stay local in the browser. No upload, queue, worker, conversion, compression, exported color, or download endpoints yet.
-- STL files up to 10 MiB have a local preview; other files show an explicitly labeled sample. The planned upload limit is 200 MiB.
-- All 15 inputs have GLB as a planned target, not an operational conversion. Original colors are the default setting.
-- Next: temporary object storage, Redis/BullMQ, ADVFX importer port, process limits and actual conversion. See docs/architecture.md.
+The API lockfile must be refreshed by npm run setup and committed before deploying. The existing frontend lockfile is unchanged. See docs/phase-2.md for exact storage setup and limitations. Actual conversions, compression, exported color and real ETA remain Phase 3+.
