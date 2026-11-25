@@ -142,3 +142,8 @@
   .preview-window { height: 265px; }
   .page-footer { flex-direction: column; padding-top: 17px; font-size: 7px; }
 }
+
+.color-toggle { display: flex; align-items: center; gap: 7px; margin: 0 0 9px; font-size: 11px; color: #b6c3bd; }
+.color-toggle input { accent-color: var(--accent); }
+.color-control input:disabled { opacity: .55; cursor: not-allowed; }
+.format-value select { background: #161e1d; color: #d9e3de; border: 0; font: inherit; max-width: 100%; }

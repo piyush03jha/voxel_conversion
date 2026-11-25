@@ -1,40 +1,42 @@
-<<<<<<< HEAD
 # Formshift — 3D File Workshop
 
-An independent 3D conversion and compression project. The current milestone is a responsive React/Vite interface with upload validation, a format compatibility map, and an interactive sample viewport. Conversion requests are not sent anywhere yet; the API, queue, storage, and worker services are the next milestone.
+Standalone 3D conversion and compression project. Phase 1 preserves the existing responsive frontend, adds a local STL preview (up to 10 MiB), and initializes a NestJS metadata API. Actual conversion is not implemented.
+
+## Layout
+
+- `apps/web`: React/Vite application (existing lockfile preserved).
+- `apps/api`: NestJS API.
+- `apps/worker`: future isolated Blender/Python conversion service.
+- `packages/shared`: shared format definitions and limits.
+- `docs`: architecture and next steps.
 
 ## Development
 
+Use Node.js 22.12+ (a supported LTS release is recommended). Each application has its own npm dependency installation to preserve the existing web lockfile and allow independent deployments.
+
 ```sh
-npm install
-npm run dev
+npm run setup
+cp .env.example .env
 ```
 
-Run the production build with `npm run build`.
+In separate terminals:
 
-## Compatibility in this starter
+```sh
+npm run dev:web
+npm run dev:api
+```
 
-The interface accepts STL, OBJ, FBX, GLB, GLTF, 3MF, PLY, USD, USDA, USDC, USDZ, ABC, BVH, SVG, and PDF inputs up to 200 MiB. GLB is the only enabled output. This intentionally matches the current ADVFX worker pipeline, which imports those formats and writes a canonical GLB; this does not imply every pairwise format conversion is supported.
+Web: http://localhost:5173. API: http://localhost:3001/api/health and /api/formats. The Vite development proxy forwards /api to the default API port. If changing the API port, update the proxy or configure VITE_API_BASE_URL. The API's first install generates apps/api/package-lock.json; commit that lockfile before deploying.
 
-The conversion service should reuse the independently implemented Blender importer/exporter and mesh optimization logic from [ADVFX](https://github.com/piyush03jha/ADVFX), rather than link this project to or modify that production repository. The source viewer uses React Three Fiber / Drei, also used by ADVFX. Review and port only the necessary files into this project when implementing the worker.
+```sh
+npm run build
+npm run lint
+npm test
+```
 
-## Planned service boundaries
+## Current limitations
 
-- **Web:** React, TypeScript, Vite, Tailwind CSS, and Three.js.
-- **API:** NestJS; validate requests, issue temporary storage URLs, and enqueue conversion metadata.
-- **Queue:** Redis and BullMQ, with bounded capacity and worker concurrency.
-- **Worker:** Python/Blender conversion in an isolated temporary directory, timeouts, resource limits, and cleanup.
-- **Storage:** temporary object storage with expiring downloads and automatic deletion.
-
-Do not upload models into Redis or buffer full uploads in API memory. Keep infrastructure configuration in environment variables. Queue position and wait estimates must come from the live queue and processing statistics, not UI placeholders.
-
-## Known limitations
-
-- The API and worker are not connected; upload selection is local browser state only.
-- The viewport is an interactive sample scene, not a preview of the selected file.
-- Queue position, ETA, output size, and compression results are not available yet.
-- Compression and color controls are UI state only; no output file is created.
-- GLB-only output is the only advertised conversion target until each additional exporter is implemented and tested.
-=======
-# voxel_conversion
->>>>>>> 42d8c6d415e923d353a993de961583c6bc5a0fa8
+- Files stay local in the browser. No upload, queue, worker, conversion, compression, exported color, or download endpoints yet.
+- STL files up to 10 MiB have a local preview; other files show an explicitly labeled sample. The planned upload limit is 200 MiB.
+- All 15 inputs have GLB as a planned target, not an operational conversion. Original colors are the default setting.
+- Next: temporary object storage, Redis/BullMQ, ADVFX importer port, process limits and actual conversion. See docs/architecture.md.

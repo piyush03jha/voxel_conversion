@@ -1,15 +1,16 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ACCEPTED_FORMATS,
   MAX_UPLOAD_BYTES,
   getFormatFromFilename,
-  isConversionSupported,
+  getSupportedOutputs,
 } from './features/converter/compatibility'
 import SampleViewport from './features/converter/SampleViewport'
 import './App.css'
 
 const COMPRESSION_LEVELS = ['None', 'Low', 'Medium', 'High'] as const
-const CONVERSION_SERVICE_CONNECTED = false
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
+const STL_PREVIEW_LIMIT = 10 * 1024 * 1024
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
@@ -24,13 +25,33 @@ function App() {
   const [isDragging, setIsDragging] = useState(false)
   const [compression, setCompression] = useState<(typeof COMPRESSION_LEVELS)[number]>('Medium')
   const [color, setColor] = useState('#8ce5c5')
+  const [customColor, setCustomColor] = useState(false)
+  const [outputFormat, setOutputFormat] = useState('GLB')
+  const [apiOnline, setApiOnline] = useState(false)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetch(`${API_BASE}/health`, { signal: controller.signal, cache: 'no-store' })
+      .then(async (response) => response.ok && (await response.json()).status === 'ok')
+      .then((online) => { if (!controller.signal.aborted) setApiOnline(online) })
+      .catch(() => { if (!controller.signal.aborted) setApiOnline(false) })
+    return () => controller.abort()
+  }, [])
 
   const inputFormat = file ? getFormatFromFilename(file.name) : null
-  const canConvert = inputFormat !== null && isConversionSupported(inputFormat, 'GLB')
+  const outputs = inputFormat ? getSupportedOutputs(inputFormat) : []
+  const selectedOutput = outputs.find((format) => format === outputFormat) ?? outputs[0] ?? 'GLB'
+  const localPreview = inputFormat === 'STL' && file !== null && file.size <= STL_PREVIEW_LIMIT
   const isColorValid = /^#[0-9a-f]{6}$/i.test(color)
 
   function selectFile(candidate?: File) {
     if (!candidate) return
+
+    if (candidate.size === 0) {
+      setFile(null)
+      setFileError('This file is empty. Choose a valid model.')
+      return
+    }
 
     if (candidate.size > MAX_UPLOAD_BYTES) {
       setFile(null)
@@ -45,6 +66,7 @@ function App() {
     }
 
     setFile(candidate)
+    setOutputFormat(getSupportedOutputs(getFormatFromFilename(candidate.name)!)[0] ?? 'GLB')
     setFileError('')
   }
 
@@ -60,8 +82,8 @@ function App() {
           <span>formshift</span>
         </a>
         <div className="topbar-right">
-          <span className="service-indicator"><i /> Local preview</span>
-          <a className="github-link" href="https://github.com/piyush03jha/ADVFX" target="_blank" rel="noreferrer">
+          <span className="service-indicator"><i /> {apiOnline ? 'API online · worker pending' : 'Local preview'}</span>
+          <a className="github-link" href="https://github.com/piyush03jha/voxel_conversion" target="_blank" rel="noreferrer">
             About the project <span aria-hidden="true">↗</span>
           </a>
         </div>
@@ -75,7 +97,7 @@ function App() {
         </div>
         <div className="intro-note">
           <span className="note-icon" aria-hidden="true">✳</span>
-          <span>Private by design<br /><small>Files are temporary by default</small></span>
+          <span>Private by design<br /><small>Files stay local in this preview</small></span>
         </div>
       </section>
 
@@ -124,7 +146,7 @@ function App() {
                 </>
               )}
             </div>
-            {file && <button className="remove-file" type="button" onClick={() => setFile(null)} aria-label="Remove selected file">×</button>}
+            {file && <button className="remove-file" type="button" onClick={() => { setFile(null); setFileError('') }} aria-label="Remove selected file">×</button>}
           </div>
           {fileError && <p className="error-message" role="alert">{fileError}</p>}
 
@@ -136,10 +158,10 @@ function App() {
             <span className="format-arrow" aria-hidden="true">→</span>
             <div className="format-select output-format">
               <span className="field-label">TO</span>
-              <div className="format-value">GLB <span>Only currently enabled export</span></div>
+              <div className="format-value"><select aria-label="Output format" value={selectedOutput} disabled={!outputs.length} onChange={(event) => setOutputFormat(event.target.value)}>{(outputs.length ? outputs : ['GLB']).map((format) => <option key={format} value={format}>{format}</option>)}</select><span>Planned export</span></div>
             </div>
           </div>
-          <p className="format-footnote">Only technically supported formats are enabled. More export formats will be added as they are verified.</p>
+          <p className="format-footnote">GLB is the initial planned export. Conversion is not available until the worker is connected.</p>
 
           <div className="preview-heading">
             <div>
@@ -150,12 +172,12 @@ function App() {
           </div>
           <div className="preview-window">
             <div className="preview-grid" aria-hidden="true" />
-            <SampleViewport />
-            <div className="preview-label"><span className="live-dot" /> INTERACTIVE SAMPLE SCENE</div>
+            <SampleViewport file={localPreview ? file : null} color={customColor && isColorValid ? color : undefined} />
+            <div className="preview-label"><span className="live-dot" /> {localPreview ? 'LOCAL STL PREVIEW' : 'INTERACTIVE SAMPLE SCENE'}</div>
             <span className="axis-label axis-x">X</span>
             <span className="axis-label axis-y">Y</span>
             <span className="axis-label axis-z">Z</span>
-            <div className="preview-footer"><span>Sample geometry · actual model preview connects with the conversion API</span><span>GL VIEWPORT</span></div>
+            <div className="preview-footer"><span>{localPreview ? 'Local STL preview · no upload' : file ? 'Sample only · this file requires server preview or exceeds the 10 MiB preview limit' : 'Sample geometry · select an STL to preview locally'}</span><span>GL VIEWPORT</span></div>
           </div>
         </div>
 
@@ -169,7 +191,7 @@ function App() {
           </div>
 
           <div className="setting-block">
-            <div className="setting-heading"><label htmlFor="compression">Compression</label><span>GLB</span></div>
+            <div className="setting-heading"><span>Compression</span><span>GLB</span></div>
             <p>Reduce file size while keeping your model useful.</p>
             <div className="compression-options" id="compression" role="group" aria-label="Compression level">
               {COMPRESSION_LEVELS.map((level) => (
@@ -189,15 +211,16 @@ function App() {
 
           <div className="setting-block color-block">
             <div className="setting-heading"><label htmlFor="color-hex">Model color</label><span>OPTIONAL</span></div>
-            <p>Apply a single color to the exported model.</p>
+            <p>Preserve the original materials, or choose a custom export color.</p>
+            <label className="color-toggle"><input type="checkbox" checked={customColor} onChange={(event) => setCustomColor(event.target.checked)} /> Use custom color</label>
             <div className="color-control">
               <label className="color-swatch" htmlFor="model-color" style={{ backgroundColor: isColorValid ? color : '#8ce5c5' }}>
-                <input id="model-color" type="color" value={isColorValid ? color : '#8ce5c5'} onChange={(event) => setColor(event.target.value)} aria-label="Choose model color" />
+                <input id="model-color" type="color" disabled={!customColor} value={isColorValid ? color : '#8ce5c5'} onChange={(event) => setColor(event.target.value)} aria-label="Choose model color" />
               </label>
-              <input id="color-hex" className="hex-input" value={color} maxLength={7} onChange={(event) => setColor(event.target.value)} aria-label="Model color HEX value" aria-invalid={!isColorValid} />
-              <span className={isColorValid ? 'color-check' : 'color-check invalid'} aria-hidden="true">{isColorValid ? '✓' : '!'}</span>
+              <input id="color-hex" className="hex-input" disabled={!customColor} value={color} maxLength={7} onChange={(event) => setColor(event.target.value)} aria-label="Model color HEX value" aria-invalid={customColor && !isColorValid} />
+              <span className={!customColor || isColorValid ? 'color-check' : 'color-check invalid'} aria-hidden="true">{!customColor ? '—' : isColorValid ? '✓' : '!'}</span>
             </div>
-            <span className="setting-note">Color is a local setting; export support is not connected yet.</span>
+            <span className="setting-note">{customColor && !isColorValid ? 'Enter a valid six-digit HEX color.' : customColor ? 'Preview color only; exported color support is pending.' : 'Original materials will be preserved when export is implemented.'}</span>
           </div>
 
           <div className="setting-divider" />
@@ -206,22 +229,22 @@ function App() {
             <div className="setting-heading"><span>Output file</span><span>ESTIMATE</span></div>
             <div className="output-summary">
               <div className="output-icon" aria-hidden="true">▧</div>
-              <div><b>{file ? `${file.name.replace(/\.[^.]+$/, '')}.glb` : 'Your model.glb'}</b><span>{file ? formatBytes(file.size) + ' before compression' : 'File size appears after upload'}</span></div>
+              <div><b>{file ? `${file.name.replace(/\.[^.]+$/, '')}.${selectedOutput.toLowerCase()}` : `Your model.${selectedOutput.toLowerCase()}`}</b><span>{file ? formatBytes(file.size) + ' before compression' : 'File size appears after upload'}</span></div>
             </div>
             <div className="size-estimate"><span>Potential size reduction</span><b>Calculated after processing</b></div>
           </div>
 
           <div className="queue-card">
-            <div className="queue-top"><span className="queue-dot" /> SERVICE NOT CONNECTED</div>
+            <div className="queue-top"><span className="queue-dot" /> {apiOnline ? 'API ONLINE · QUEUE PENDING' : 'SERVICE NOT CONNECTED'}</div>
             <p>Queue position and wait time will show here when the conversion API is online.</p>
             <div className="queue-meta"><span>QUEUE <b>—</b></span><span>ETA <b>—</b></span></div>
           </div>
 
-          <button className="convert-button" type="button" disabled={!CONVERSION_SERVICE_CONNECTED || !canConvert}>
+          <button className="convert-button" type="button" disabled>
             <span>{file ? 'Conversion service coming soon' : 'Add a file to continue'}</span>
             <span aria-hidden="true">↗</span>
           </button>
-          <p className="privacy-note"><span aria-hidden="true">⌑</span> Files will be temporary and automatically deleted</p>
+          <p className="privacy-note"><span aria-hidden="true">⌑</span> Files are local for now; temporary storage is planned</p>
         </aside>
       </section>
 

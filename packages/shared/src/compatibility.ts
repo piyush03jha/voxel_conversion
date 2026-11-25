@@ -39,7 +39,9 @@ const SUPPORTED_OUTPUTS: Record<ModelFormat, readonly ModelFormat[]> = {
 }
 
 export function getFormatFromFilename(filename: string): ModelFormat | null {
-  const extension = filename.split('.').pop()?.toUpperCase()
+  const dot = filename.lastIndexOf('.')
+  if (dot <= 0 || dot === filename.length - 1) return null
+  const extension = filename.slice(dot + 1).toUpperCase()
   return ACCEPTED_FORMATS.find((format) => format === extension) ?? null
 }
 
@@ -49,3 +51,9 @@ export function isConversionSupported(
 ): boolean {
   return SUPPORTED_OUTPUTS[input].includes(output)
 }
+
+export function getSupportedOutputs(input: ModelFormat): readonly ModelFormat[] {
+  return SUPPORTED_OUTPUTS[input]
+}
+
+export const CONVERSION_AVAILABLE = false
