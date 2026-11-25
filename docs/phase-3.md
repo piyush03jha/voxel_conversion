@@ -1,36 +1,39 @@
-# Phase 3: first conversion worker
+# Phase 3 — Existing ADVFX conversion engine
 
-## Development setup
+Scope: reuse the existing 15 input formats only, with GLB as the sole output. Additional import/export development (Phase 4) is deferred until the client requests it. Phase 5 adds compression; custom color is paused.
 
-Use Node 22.12+, Linux or Docker, private Redis/MinIO. From repository root:
+## Existing routes
 
-1. npm run setup (refresh and commit apps/api/package-lock.json; Phase 2 dependency changes are not yet locked).
-2. Copy missing settings from .env.example into .env. Set QUEUE_ACCEPT_JOBS=true and QUEUE_TEST_MODE=false for isolated development.
+- STL: strict content validation, native dense mesh converter by default.
+- PLY: native dense mesh converter, then Blender only on explicit unsupported exit code 3.
+- 3MF: native 3MF converter, then existing Blender add-on on exit code 3.
+- OBJ: ADVFX's large geometry-only native route (30 MiB threshold), otherwise Blender.
+- GLB: structural preflight and passthrough when None is selected.
+- FBX, GLTF, USD, USDA, USDC, USDZ, ABC, BVH, SVG, PDF: existing Blender importer. PDF uses Poppler first-page conversion. GLTF must be self-contained; external dependencies are not uploaded. SVG/PDF have the inherited vector limitations; BVH produces a visual skeleton and Alembic may export only a static frame.
+
+All three original scripts are copied from ADVFX at the pinned source commit; see apps/worker/scripts/PROVENANCE.md. No changes to ADVFX. The native route does not preserve all source normals, UV/material features or color extensions. Import support is not a guarantee of full fidelity or compatibility with every file.
+
+## Local setup (trusted fixtures only)
+
+Node 22.12+, Docker Compose, Linux.
+1. npm run setup (regenerate apps/api/package-lock.json and commit after verification).
+2. Add missing .env settings from .env.example. Set QUEUE_ACCEPT_JOBS=true, QUEUE_TEST_MODE=false, WORKER_SANDBOX=trusted-local for isolated local testing; never use this mode for untrusted/public inputs.
 3. npm run infra:up
-4. npm run worker:up (builds and starts two worker replicas; use docker compose --profile worker up -d --build --scale worker=1 worker on a low-memory laptop).
-5. npm run dev:api in another terminal.
-6. Check /api/health: workers should be 1 or 2, conversionAvailable true. /api/formats advertises only STL → GLB.
-7. npm run smoke:conversion; npm test; npm run test:native (Linux); npm run build; npm run lint.
-8. Stop workers with docker compose --profile worker stop worker. Reset QUEUE_ACCEPT_JOBS=false for public use.
+4. npm run worker:up (two replicas; use docker compose --profile worker up -d --build --scale worker=1 worker for a lower-memory machine).
+5. npm run dev:api
+6. GET /api/health and /api/formats; when worker is ready, all 15 input routes to GLB are advertised.
+7. npm run smoke:conversion; npm test; npm run test:native; npm run build; npm run lint.
+8. Test each existing format using SMOKE_MODEL_PATH=/absolute/path/to/fixture npm run smoke:conversion. Use fixtures with supported geometry and no external dependencies. See phase-5.md for compression.
+9. Stop worker and reset QUEUE_ACCEPT_JOBS=false before public use.
 
-For a trusted Linux host with Python 3 and util-linux prlimit installed, use npm run dev:worker instead of Docker (do not run both unless intended). The root npm build compiles the worker with the existing API package; the worker runs as a separate process/service. No additional npm dependencies.
+The worker image includes the same Blender 4.5.14, 3MF add-on commit and glTF Transform 4.5.1 versions as ADVFX. For a native local worker, install the equivalent tools and run npm run dev:worker. The worker process is separate from NestJS.
 
-## Processing path
+## Resource and security boundaries
 
-BullMQ job claim → validate UUID, allowed keys, size, options, expiry → download using If-Match and bounded stream → private job directory → strict STL content preflight → ADVFX dense native converter → verify GLB structure → conditional streamed upload → mark complete → delete job directory. API signs a download only after BullMQ marks completion and confirms output exists. Input/output objects remain subject to Phase 2 expiry and bucket lifecycle.
+The worker streams object files with ETag validation; local file names are generated from a strict allowlist; GLB container structure is checked; 3MF/USDZ archive paths, entry counts, expanded sizes and ratios are bounded. Invalid native inputs, memory failures and timeouts are not retried. The job directory is removed on completion or failure. The output is uploaded conditionally before marking the job complete. Metadata and objects expire under the Phase 2 cleanup rules.
 
-Each replica uses concurrency one, attempts one, maxStalledCount zero, 120-second BullMQ lock, 30-second stalled check. Heartbeats expire after 30 seconds; API fails closed when no heartbeat exists unless explicitly in queue-only test mode. A Redis error aborts active subprocess work. Explicit lock-extension checks before conversion, output upload and completion reduce stale-worker publication; crash/lock loss can still leave an orphan output until lifecycle cleanup. A conditional output write prevents overwrite. These are not a full distributed fencing protocol. No retries of invalid files and no fallback to Blender.
+One active job per worker, 10-minute overall deadline, no automatic retries, 200 MiB input/output caps, 768 MiB native virtual address-space cap, 4 GiB Blender virtual address-space cap (not physical RAM), 1 GiB local container RAM and one CPU by default. Optimizer has a separate heap/time budget; see phase-5.md. Native geometry limits and all caps remain configurable. Benchmark real 200 MiB models before increasing concurrency or declaring support.
 
-Default 10-minute job deadline includes transfers/conversion; reduced by job expiry. Default 768 MiB converter virtual address-space cap, 1 CPU thread, 4 million input triangles, 1.5 million unique vertex cells, 200 MiB output cap, 1 GiB local container memory and 1 CPU. 200 MiB is an admission limit, not a guarantee that every model fits worker limits. Complex meshes may fail safely. Linux prlimit and process-group SIGKILL constrain subprocesses; subprocess receives a minimal environment without storage credentials. Container runs non-root with dropped capabilities. Disk usage is bounded per input/output but a hard disk quota and cleanup after forced container termination are infrastructure tasks. No full per-job filesystem/network sandbox yet.
+Public conversion requires explicit PUBLIC_CONVERSION_APPROVED=true and QUEUE_ACCEPT_JOBS=true on a production API, plus WORKER_SANDBOX=bwrap on production workers. The sandbox restricts filesystem mounts, network and subprocess environment. Worker probes the sandbox before advertising readiness and does not silently fall back to unsandboxed execution. Namespace availability on Railway has NOT been verified; if it fails, deployment must stay disabled until an equivalent supported isolation mechanism is established. Local Docker Compose intentionally uses trusted-local mode for developer fixtures only. Never expose it publicly. Additional rate limits, malicious-file/format testing, storage provider verification, memory benchmarks and crash recovery remain release gates.
 
-## Scope
-
-- STL binary/ASCII to GLB with None compression, no custom color. Exact vertex welding (degenerate faces may be dropped), no intentional decimation. STL color extensions and original normals are not preserved by the native converter.
-- Remaining 14 input formats are planned only. Blender and 3MF scripts are copied from ADVFX for subsequent audited routes. Optional trusted local Blender STL path requires Blender 4.5 and may need a larger memory cap.
-- No real ETA, active cancellation, additional exporters, compression or exported custom color. Frontend submission still disabled; use API smoke test for this milestone.
-- Queue-only Phase 2 test: stop worker, set QUEUE_TEST_MODE=true and QUEUE_ACCEPT_JOBS=true, restart API, run npm run smoke:queue. Never enable queue-only mode in public deployment.
-- No live production deployment. Verify signed length and conditional PUT on R2, test two workers, stalls, invalid files, memory usage on 200 MiB models, per-IP limits, and sandboxing before enabling public conversion.
-
-## Railway
-
-Build worker separately using apps/worker/Dockerfile from repo root; use the same private Redis and R2 settings as API. Start two replicas only after resource benchmarking. No public port required. Production admission remains false by default. Docker build currently uses npm install because Phase 2 lockfile is stale; switch to npm ci once refreshed and verified.
+Upgrade API and all worker replicas together (heartbeat version changed). Stop old workers before accepting new jobs. No real ETA, active cancellation, frontend submission or deployment yet. Phase 3 code is merged by request; runtime verification is still required.

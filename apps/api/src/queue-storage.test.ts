@@ -7,7 +7,8 @@ import { MAX_UPLOAD_BYTES } from '../../../packages/shared/src/compatibility'
 const good = { filename: 'model.stl', size: 100, outputFormat: 'GLB' }
 test('metadata validation defaults and maximum size', () => {
   assert.deepEqual(validateUpload(good), { inputFormat: 'STL', originalBytes: 100, outputFormat: 'GLB', compression: 'None', color: null })
-  assert.equal(validateUpload({ ...good, size: MAX_UPLOAD_BYTES, color: '#ABCDEF' }).color, '#abcdef')
+  assert.equal(validateUpload({ ...good, size: MAX_UPLOAD_BYTES, compression: 'High' }).compression, 'High')
+  assert.throws(() => validateUpload({ ...good, color: '#ABCDEF' }))
   for (const bad of [{ size: 0 }, { size: MAX_UPLOAD_BYTES + 1 }, { size: 1.5 }, { size: '10' }, { filename: '../test.stl' }, { filename: 'test.exe' }, { outputFormat: 'OBJ' }, { color: '#abc' }, { compression: 'Extreme' }, { inputKey: 'arbitrary' }]) assert.throws(() => validateUpload({ ...good, ...bad }))
   assert.throws(() => validateUpload(null))
 })

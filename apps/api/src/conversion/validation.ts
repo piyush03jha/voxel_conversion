@@ -25,8 +25,8 @@ export function validateUpload(body: unknown): UploadRequest {
   const compression = b.compression ?? 'None'
   if (!COMPRESSION_LEVELS.includes(compression as CompressionLevel)) throw new BadRequestException('Invalid compression level')
   const color = b.color ?? null
-  if (color !== null && (typeof color !== 'string' || !/^#[0-9a-f]{6}$/i.test(color))) throw new BadRequestException('Invalid HEX color')
-  return { inputFormat, outputFormat: b.outputFormat as ModelFormat, originalBytes: b.size, compression: compression as CompressionLevel, color: color === null ? null : (color as string).toLowerCase() }
+  if (color !== null) throw new BadRequestException('Custom model color is paused')
+  return { inputFormat, outputFormat: b.outputFormat as ModelFormat, originalBytes: b.size, compression: compression as CompressionLevel, color: null }
 }
 
 export function tokenHash(token: string): string {

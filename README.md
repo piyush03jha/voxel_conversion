@@ -1,6 +1,6 @@
 # Formshift — 3D File Workshop
 
-Standalone 3D file converter. Phase 3 adds the first STL-to-GLB conversion worker using the ADVFX native converter. Public job submission remains disabled pending verification.
+Standalone 3D file converter. Phase 3 integrates the existing ADVFX import routes to GLB. Phase 5 adds four compression presets and same-format GLB optimization. Additional formats and custom color are deferred. Public job submission remains disabled pending verification.
 
 ## Layout
 
@@ -8,7 +8,7 @@ Standalone 3D file converter. Phase 3 adds the first STL-to-GLB conversion worke
 - apps/api: NestJS metadata, storage and queue API.
 - apps/worker: independent conversion worker and vendored ADVFX scripts.
 - packages/shared: format definitions and queue types.
-- docs/phase-2.md and docs/phase-3.md: API, worker, security, deployment and smoke-test instructions.
+- docs/phase-2.md, docs/phase-3.md and docs/phase-5.md: API, worker, security, deployment and smoke-test instructions.
 
 ## Local development
 
@@ -37,4 +37,4 @@ npm run build
 npm run lint
 ```
 
-The API lockfile must be refreshed by npm run setup and committed before deploying. The existing frontend lockfile is unchanged. See docs/phase-2.md for exact storage setup and limitations. Only STL to GLB with no optional processing is implemented. Additional formats, compression, exported color, real ETA and frontend submission remain pending.
+The API lockfile must be refreshed by npm run setup and committed before deploying. The existing frontend lockfile is unchanged. See docs/phase-2.md for exact storage setup and limitations. The existing 15 inputs to GLB and compression presets are implemented in code; runtime verification is pending. Additional imports/exports, custom color, real ETA and frontend submission remain deferred. Public admission requires explicit approval and a working sandbox. See docs/phase-3.md and docs/phase-5.md.
