@@ -30,3 +30,10 @@ test('presigned upload requires length, content type and conditional write', asy
     keys.forEach((key, i) => { const value = old[i]; if (value === undefined) delete process.env[key]; else process.env[key] = value })
   }
 })
+
+test('preview requests are isolated and have fixed options', () => {
+  assert.equal(validateUpload({ ...good, filename:'drawing.pdf', purpose:'preview' }).purpose,'preview')
+  assert.throws(()=>validateUpload({...good,purpose:'preview',compression:'High'}))
+  assert.throws(()=>validateUpload({...good,purpose:'preview',outputFormat:'STL'}))
+  assert.throws(()=>validateUpload({...good,purpose:'unknown'}))
+})

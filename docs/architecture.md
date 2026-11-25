@@ -9,3 +9,5 @@ Phase 3 reuses all 15 existing input routes. Phase 4A adds selected exporters fo
 Browser-first extension: eligible small geometry-only and self-contained glTF repacking jobs bypass API/storage/Redis and run in a bounded browser Web Worker. Other jobs use the server pipeline. Unsupported local content requires explicit user-approved upload. See browser-first.md.
 
 Phase 6 exposes approximate waiting time from recent completed jobs, local input/output geometry preview, and in-memory pause/resume of server status tracking. See phase-6.md.
+
+All-format preview: local geometry first; opt-in low-priority preview jobs generate bounded GLB geometry or PNG document thumbnails. Stored outputs can be copied internally into private preview sessions. See preview-all-formats.md.

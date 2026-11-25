@@ -44,3 +44,5 @@ The API lockfile must be refreshed by npm run setup and committed before deployi
 See [browser-first routing and frontend integration](docs/browser-first.md). Eligible geometry and glTF repacking jobs execute locally; other conversions use the server. Run npm run test:browser for the codec regression suite. Runtime verification remains required.
 
 Phase 6 UI, bounded model preview, measured queue wait estimation, and resumable status tracking are documented in [Phase 6](docs/phase-6.md). Server output preview requires GET CORS on temporary storage. Runtime verification remains pending.
+
+All 15 formats have preview routes; see [all-format preview](docs/preview-all-formats.md). Server previews are optional, bounded and separate from conversion results.

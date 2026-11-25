@@ -8,6 +8,9 @@ The API samples up to 50 recent successful completed jobs from BullMQ (last hour
 
 ## Preview
 
+Update: [all-format preview](preview-all-formats.md) extends the local preview described below with optional bounded server-generated GLB/PNG for every existing format.
+
+
 STL/OBJ/PLY geometry-only, and supported self-contained uncompressed GLB/GLTF triangle geometry, up to 10 MiB. A dedicated Web Worker prepares a sanitized geometry-only GLB: bounded vertices/triangles, valid accessor byte ranges and indices, finite positions/transforms, acyclic nodes, no external resources, no images, skins, animation or extensions in the preview representation. Three.js renders geometry with orbit, pan and zoom; preview normalization affects display only, not exported files. Unsupported material/geometry/extension content or large files show an unavailable message. No fake sample is shown for unsupported selected input. Preview is paused during conversion to reduce memory. Eligible outputs can be previewed explicitly after completion (bounded signed download for server result); no extra server conversion. R2/MinIO must allow GET CORS for server output preview; normal download remains available without preview.
 
 ## Recovery

@@ -2,11 +2,12 @@ import type { CompressionLevel, ModelFormat } from './compatibility'
 
 export const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
 export type Health = { status: string; conversionAvailable: boolean }
-export type Session = { id: string; token: string; uploadUrl: string; uploadHeaders: Record<string,string>; expiresAt: number }
-export type JobStatus = { status: string; position?: number | null; etaSeconds?: number | null; progress?: number | null; originalBytes?: number; convertedBytes?: number | null; outputBytes?: number | null; reductionPercent?: number | null; compressionReductionPercent?: number | null; warning?: string | null; error?: string | null }
+export type JobSession = { id: string; token: string; expiresAt: number }
+export type Session = JobSession & { uploadUrl: string; uploadHeaders: Record<string,string> }
+export type JobStatus = { status: string; previewKind?: 'GLB' | 'PNG' | null; position?: number | null; etaSeconds?: number | null; progress?: number | null; originalBytes?: number; convertedBytes?: number | null; outputBytes?: number | null; reductionPercent?: number | null; compressionReductionPercent?: number | null; warning?: string | null; error?: string | null }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000)
+async function request<T>(path: string, options: RequestInit = {}, timeoutMs = 20000): Promise<T> {
+  const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs)
   const response = await fetch(API_BASE + path, { ...options, signal, cache:'no-store', credentials:'omit' })
   if (!response.ok) {
     const body = await response.json().catch(()=>({}))
@@ -15,13 +16,13 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return response.json() as Promise<T>
 }
 export const health = (signal: AbortSignal) => request<Health>('/health', {signal})
-function auth(session: Session) { return {Authorization:'Bearer '+session.token} }
-const jobPath = (session: Session) => '/jobs/'+encodeURIComponent(session.id)
-export const createSession = (file:File,output:ModelFormat,compression:CompressionLevel,signal:AbortSignal) => request<Session>('/jobs/uploads',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:file.name,size:file.size,outputFormat:output,compression,color:null}),signal})
-export const submit = (session:Session,signal:AbortSignal) => request<JobStatus>(jobPath(session)+'/submit',{method:'POST',headers:auth(session),signal})
-export const status = (session:Session,signal:AbortSignal) => request<JobStatus>(jobPath(session),{headers:auth(session),signal})
-export const cancel = (session:Session) => request<JobStatus>(jobPath(session),{method:'DELETE',headers:auth(session)})
-export const download = (session:Session) => request<{url:string;filename:string}>(jobPath(session)+'/download',{headers:auth(session)})
+function auth(session: JobSession) { return {Authorization:'Bearer '+session.token} }
+const jobPath = (session: JobSession) => '/jobs/'+encodeURIComponent(session.id)
+export const createSession = (file:File,output:ModelFormat,compression:CompressionLevel,signal:AbortSignal, purpose: 'conversion' | 'preview' = 'conversion') => request<Session>('/jobs/uploads',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:file.name,size:file.size,outputFormat:output,compression,color:null,purpose}),signal})
+export const submit = (session:JobSession,signal:AbortSignal) => request<JobStatus>(jobPath(session)+'/submit',{method:'POST',headers:auth(session),signal})
+export const status = (session:JobSession,signal:AbortSignal) => request<JobStatus>(jobPath(session),{headers:auth(session),signal})
+export const cancel = (session:JobSession) => request<JobStatus>(jobPath(session),{method:'DELETE',headers:auth(session)})
+export const download = (session:JobSession) => request<{url:string;filename:string}>(jobPath(session)+'/download',{headers:auth(session)})
 
 export function upload(session:Session,file:File,signal:AbortSignal,progress:(percent:number)=>void):Promise<void> {
   return new Promise((resolve,reject)=>{
@@ -50,7 +51,7 @@ export function wait(ms:number,signal:AbortSignal) {
   })
 }
 
-export async function fetchPreview(session:Session,expectedBytes:number,signal:AbortSignal):Promise<Blob>{
+export async function fetchPreview(session:JobSession,expectedBytes:number,signal:AbortSignal):Promise<Blob>{
   const max=10*1024*1024
   if(!Number.isSafeInteger(expectedBytes)||expectedBytes<1||expectedBytes>max)throw new Error('Preview size limit')
   const signed=await request<{url:string}>(jobPath(session)+'/download',{headers:auth(session),signal})
@@ -71,3 +72,5 @@ export async function fetchPreview(session:Session,expectedBytes:number,signal:A
     return new Blob(chunks)
   }finally{await reader.cancel().catch(()=>undefined);reader.releaseLock()}
 }
+
+export const createOutputPreview = (session:JobSession, signal:AbortSignal) => request<JobSession>(jobPath(session)+'/preview',{method:'POST',headers:auth(session),signal},90000)

@@ -36,3 +36,10 @@ test('GLB verification rejects corrupt header', async () => {
     await assert.rejects(verifyGlb(file, 50))
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
+
+test('preview job uses dedicated GLB/PNG output key and fixed compression',()=>{
+  const data={...good,purpose:'preview' as const,inputFormat:'PDF' as const,inputKey:'temporary/'+id+'/input.pdf',outputKey:'temporary/'+id+'/output.png'}
+  assert.doesNotThrow(()=>checkJob(id,data,1000))
+  assert.throws(()=>checkJob(id,{...data,outputKey:good.outputKey},1000))
+  assert.throws(()=>checkJob(id,{...data,compression:'Low'},1000))
+})
