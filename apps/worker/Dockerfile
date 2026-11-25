@@ -10,7 +10,7 @@ COPY packages/shared packages/shared
 RUN npm run build --prefix apps/api && npm prune --omit=dev --prefix apps/api
 
 FROM node:22-bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends python3 util-linux ca-certificates tini curl xz-utils poppler-utils bubblewrap libxi6 libxrender1 libxfixes3 libxkbcommon0 libsm6 libgl1 libegl1 libfontconfig1 libx11-6 libxext6 libxrandr2 libxinerama1 libxcursor1 libdbus-1-3 libwayland-client0 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends python3 util-linux ca-certificates tini curl xz-utils poppler-utils librsvg2-bin bubblewrap libxi6 libxrender1 libxfixes3 libxkbcommon0 libsm6 libgl1 libegl1 libfontconfig1 libx11-6 libxext6 libxrandr2 libxinerama1 libxcursor1 libdbus-1-3 libwayland-client0 && rm -rf /var/lib/apt/lists/*
 # Versions match the existing ADVFX worker image.
 ARG BLENDER_VERSION=4.5.14
 RUN curl -fsSL "https://download.blender.org/release/Blender4.5/blender-${BLENDER_VERSION}-linux-x64.tar.xz" -o /tmp/blender.tar.xz \
