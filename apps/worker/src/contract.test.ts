@@ -11,12 +11,14 @@ const id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 const good: ConversionJobData = { inputKey: 'temporary/' + id + '/input.stl', outputKey: 'temporary/' + id + '/output.glb', inputFormat: 'STL', outputFormat: 'GLB', originalBytes: 134, compression: 'None', color: null, etag: '"etag"', expiresAt: 2000 }
 test('worker rejects unexpected keys, expiry, size and unimplemented options', () => {
   assert.doesNotThrow(() => checkJob(id, good, 1000))
-  for (const value of [{ ...good, inputKey: '../etc/passwd' }, { ...good, expiresAt: 999 }, { ...good, originalBytes: 0 }, { ...good, inputFormat: 'OBJ' as const }, { ...good, color: '#000000' }]) assert.throws(() => checkJob(id, value, 1000))
+  for (const value of [{ ...good, inputKey: '../etc/passwd' }, { ...good, expiresAt: 999 }, { ...good, originalBytes: 0 }, { ...good, inputFormat: 'OBJ' as const }, { ...good, outputFormat: 'STL' as const }, { ...good, outputFormat: 'BVH' as const, outputKey: 'temporary/' + id + '/output.bvh' }, { ...good, color: '#000000' }]) assert.throws(() => checkJob(id, value, 1000))
 })
 test('existing input routing and compression presets', () => {
   for (const format of ['STL', 'OBJ', 'FBX', 'GLB', 'GLTF', '3MF', 'PLY', 'USD', 'USDA', 'USDC', 'USDZ', 'ABC', 'BVH', 'SVG', 'PDF'] as const) {
     assert.doesNotThrow(() => checkJob(id, { ...good, inputFormat: format, inputKey: 'temporary/' + id + '/input.' + format.toLowerCase(), compression: 'High' }, 1000))
   }
+  assert.doesNotThrow(() => checkJob(id, { ...good, outputFormat: 'PLY', outputKey: 'temporary/' + id + '/output.ply', compression: 'High' }, 1000))
+  assert.throws(() => checkJob(id, { ...good, outputFormat: 'FBX', outputKey: 'temporary/' + id + '/output.fbx', compression: 'High' }, 1000))
   for (const [level, size] of [['Low', '2048'], ['Medium', '1024'], ['High', '512']] as const) {
     const args = optimizationArgs(level, false, 'in.glb', 'out.glb')
     assert.equal(args[args.indexOf('--texture-size') + 1], size)

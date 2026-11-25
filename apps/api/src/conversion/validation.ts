@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { BadRequestException } from '@nestjs/common'
-import { ACCEPTED_FORMATS, getFormatFromFilename, isConversionSupported, MAX_UPLOAD_BYTES } from '../../../../packages/shared/src/compatibility'
+import { ACCEPTED_FORMATS, getFormatFromFilename, isConversionSupported, MAX_UPLOAD_BYTES, getCompressionLevels } from '../../../../packages/shared/src/compatibility'
 import type { ModelFormat } from '../../../../packages/shared/src/compatibility'
 import { COMPRESSION_LEVELS } from '../../../../packages/shared/src/jobs'
 import type { CompressionLevel } from '../../../../packages/shared/src/jobs'
@@ -23,7 +23,7 @@ export function validateUpload(body: unknown): UploadRequest {
   if (typeof b.size !== 'number' || !Number.isSafeInteger(b.size) || b.size < 1 || b.size > MAX_UPLOAD_BYTES) throw new BadRequestException('File must be between 1 byte and 200 MiB')
   if (typeof b.outputFormat !== 'string' || !ACCEPTED_FORMATS.includes(b.outputFormat as ModelFormat) || !isConversionSupported(inputFormat, b.outputFormat as ModelFormat)) throw new BadRequestException('Unsupported output format')
   const compression = b.compression ?? 'None'
-  if (!COMPRESSION_LEVELS.includes(compression as CompressionLevel)) throw new BadRequestException('Invalid compression level')
+  if (!COMPRESSION_LEVELS.includes(compression as CompressionLevel) || !getCompressionLevels(b.outputFormat as ModelFormat).includes(compression as CompressionLevel)) throw new BadRequestException('Compression level is not supported for this output format')
   const color = b.color ?? null
   if (color !== null) throw new BadRequestException('Custom model color is paused')
   return { inputFormat, outputFormat: b.outputFormat as ModelFormat, originalBytes: b.size, compression: compression as CompressionLevel, color: null }

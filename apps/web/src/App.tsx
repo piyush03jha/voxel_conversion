@@ -4,6 +4,8 @@ import {
   MAX_UPLOAD_BYTES,
   getFormatFromFilename,
   getSupportedOutputs,
+  getCompressionLevels,
+  getOutputWarning,
 } from './features/converter/compatibility'
 import SampleViewport from './features/converter/SampleViewport'
 import './App.css'
@@ -39,6 +41,8 @@ function App() {
   const inputFormat = file ? getFormatFromFilename(file.name) : null
   const outputs = inputFormat ? getSupportedOutputs(inputFormat) : []
   const selectedOutput = outputs.find((format) => format === outputFormat) ?? outputs[0] ?? 'GLB'
+  const compressionLevels = getCompressionLevels(selectedOutput)
+  const outputWarning = getOutputWarning(selectedOutput)
   const localPreview = inputFormat === 'STL' && file !== null && file.size <= STL_PREVIEW_LIMIT
 
   function selectFile(candidate?: File) {
@@ -64,6 +68,7 @@ function App() {
 
     setFile(candidate)
     setOutputFormat(getSupportedOutputs(getFormatFromFilename(candidate.name)!)[0] ?? 'GLB')
+    setCompression('None')
     setFileError('')
   }
 
@@ -155,10 +160,10 @@ function App() {
             <span className="format-arrow" aria-hidden="true">→</span>
             <div className="format-select output-format">
               <span className="field-label">TO</span>
-              <div className="format-value"><select aria-label="Output format" value={selectedOutput} disabled={!outputs.length} onChange={(event) => setOutputFormat(event.target.value)}>{(outputs.length ? outputs : ['GLB']).map((format) => <option key={format} value={format}>{format}</option>)}</select><span>Planned export</span></div>
+              <div className="format-value"><select aria-label="Output format" value={selectedOutput} disabled={!outputs.length} onChange={(event) => { setOutputFormat(event.target.value); setCompression('None') }}>{(outputs.length ? outputs : ['GLB']).map((format) => <option key={format} value={format}>{format}</option>)}</select><span>Selected export</span></div>
             </div>
           </div>
-          <p className="format-footnote">GLB is the only export for now. API conversion is implemented; browser submission is a later milestone.</p>
+          <p className="format-footnote">Choose a compatible output. {outputWarning ?? 'Format conversion may change materials or geometry.'}</p>
 
           <div className="preview-heading">
             <div>
@@ -188,8 +193,8 @@ function App() {
           </div>
 
           <div className="setting-block">
-            <div className="setting-heading"><span>Compression</span><span>GLB</span></div>
-            <p>None skips optimization. Low/Medium optimize meshes and textures; High may also simplify static geometry.</p>
+            <div className="setting-heading"><span>Compression</span><span>{selectedOutput}</span></div>
+            <p>{compressionLevels.length === 1 ? 'Compression is unavailable for this output.' : selectedOutput === 'GLB' ? 'GLB optimization may change texture quality or simplify static geometry.' : selectedOutput === '3MF' ? 'ZIP compression changes package size without deliberately reducing geometry.' : 'Mesh compression may reduce static geometry. The original export is retained if the result is not smaller.'}</p>
             <div className="compression-options" id="compression" role="group" aria-label="Compression level">
               {COMPRESSION_LEVELS.map((level) => (
                 <button
@@ -197,6 +202,7 @@ function App() {
                   type="button"
                   key={level}
                   aria-pressed={compression === level}
+                  disabled={!compressionLevels.includes(level)}
                   onClick={() => setCompression(level)}
                 >{level}</button>
               ))}

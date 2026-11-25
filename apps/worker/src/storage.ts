@@ -60,7 +60,7 @@ export async function uploadOutput(client: S3Client, config: WorkerConfig, data:
   const body = createReadStream(path)
   try {
     await client.send(new PutObjectCommand({
-      Bucket: config.bucket, Key: data.outputKey, ContentType: 'model/gltf-binary', ContentLength: bytes, Body: body, IfNoneMatch: '*',
+      Bucket: config.bucket, Key: data.outputKey, ContentType: 'application/octet-stream', ContentLength: bytes, Body: body, IfNoneMatch: '*',
     }), { abortSignal: signal })
   } finally { body.destroy() }
 }

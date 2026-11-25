@@ -3,6 +3,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import Redis from 'ioredis'
 import { Queue } from 'bullmq'
 import type { ConversionJobData, ConversionJobResult } from '../../../../packages/shared/src/jobs'
+import { getCompressionLevels } from '../../../../packages/shared/src/compatibility'
 import { QUEUE_NAME, WORKER_HEARTBEATS, isWorkerRoute } from '../../../../packages/shared/src/jobs'
 import { settings } from './config'
 import { StorageService, UPLOAD_HEADERS } from './storage.service'
@@ -112,7 +113,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   async create(body: unknown) {
     if (!this.config.acceptJobs || !this.storage.configured) throw new ServiceUnavailableException('Job submission is disabled')
     const request = validateUpload(body)
-    if (!isWorkerRoute(request.inputFormat, request.outputFormat) || request.color !== null) throw new BadRequestException('Only existing ADVFX inputs to GLB are supported; custom color is paused')
+    if (!isWorkerRoute(request.inputFormat, request.outputFormat) || request.color !== null) throw new BadRequestException('Unsupported conversion pair; custom color is paused')
     if (!this.config.queueTestMode && await this.workerCount() < 1) throw new ServiceUnavailableException('No conversion worker is available')
     const { redis } = this.ready()
     const count = Number(await redis.eval(RATE, 1, prefix + 'create-rate'))
@@ -152,7 +153,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       const existing = await queue.getJob(id)
       if (existing) return { id, status: await existing.getState() }
       if (!this.config.acceptJobs) throw new ServiceUnavailableException('Job submission is disabled')
-      if (!isWorkerRoute(s.inputFormat, s.outputFormat) || s.color !== null) throw new BadRequestException('Conversion route not enabled')
+      if (!isWorkerRoute(s.inputFormat, s.outputFormat) || !getCompressionLevels(s.outputFormat).includes(s.compression) || s.color !== null) throw new BadRequestException('Conversion route not enabled')
       if (!this.config.queueTestMode && await this.workerCount() < 1) throw new ServiceUnavailableException('No conversion worker is available')
       if (Date.now() >= s.uploadUntil) throw new ConflictException('Upload session expired')
       const object = await this.storage.head(s.inputKey)
@@ -194,7 +195,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     }
     const outputBytes = state === 'completed' && Number.isSafeInteger(job.returnvalue?.outputBytes) && job.returnvalue.outputBytes > 0 ? job.returnvalue.outputBytes : null
     const convertedBytes = state === 'completed' && Number.isSafeInteger(job.returnvalue?.convertedBytes) && job.returnvalue.convertedBytes > 0 ? job.returnvalue.convertedBytes : null
-    return { id, status: state, position, etaSeconds: null, convertedBytes, compressionApplied: state === 'completed' ? job.returnvalue?.compressionApplied ?? false : null, warning: state === 'completed' ? job.returnvalue?.warning ?? null : null, compressionReductionPercent: outputBytes !== null && convertedBytes !== null ? Math.round((1 - outputBytes / convertedBytes) * 10000) / 100 : null, error: state === 'failed' ? 'Conversion failed. Check the input file, missing dependencies or model complexity.' : null, progress: typeof job.progress === 'number' ? job.progress : null, originalBytes: s.originalBytes, outputBytes, reductionPercent: outputBytes === null ? null : Math.round((1 - outputBytes / s.originalBytes) * 10000) / 100 }
+    return { id, status: state, outputFormat: s.outputFormat, position, etaSeconds: null, convertedBytes, compressionApplied: state === 'completed' ? job.returnvalue?.compressionApplied ?? false : null, warning: state === 'completed' ? job.returnvalue?.warning ?? null : null, compressionReductionPercent: outputBytes !== null && convertedBytes !== null ? Math.round((1 - outputBytes / convertedBytes) * 10000) / 100 : null, error: state === 'failed' ? 'Conversion failed. Check the input file, missing dependencies or model complexity.' : null, progress: typeof job.progress === 'number' ? job.progress : null, originalBytes: s.originalBytes, outputBytes, reductionPercent: outputBytes === null ? null : Math.round((1 - outputBytes / s.originalBytes) * 10000) / 100 }
   }
   async cancel(id: string, authorization?: string) {
     await this.authorized(id, authorization)
@@ -223,7 +224,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     if (!output || !output.ContentLength) throw new NotFoundException('Output unavailable')
     const seconds = Math.min(this.config.downloadSeconds, Math.floor((s.expiresAt - Date.now()) / 1000))
     if (seconds < 1) throw new ConflictException('Job expired')
-    return { url: await this.storage.signDownload(s.outputKey, seconds), expiresIn: seconds }
+    return { url: await this.storage.signDownload(s.outputKey, seconds, s.outputFormat), filename: 'converted.' + s.outputFormat.toLowerCase(), expiresIn: seconds }
   }
   private startSweep() {
     if (this.closing || this.sweepTask || !this.storage.configured) return

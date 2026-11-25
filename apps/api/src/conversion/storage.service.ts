@@ -2,6 +2,8 @@ import { Injectable, OnModuleDestroy, ServiceUnavailableException } from '@nestj
 import { S3Client, PutObjectCommand, HeadObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
+import type { ModelFormat } from '../../../../packages/shared/src/compatibility'
+
 export const UPLOAD_HEADERS = { 'Content-Type': 'application/octet-stream', 'If-None-Match': '*' }
 @Injectable()
 export class StorageService implements OnModuleDestroy {
@@ -52,10 +54,10 @@ export class StorageService implements OnModuleDestroy {
     const { client, Bucket } = this.ready()
     await client.send(new DeleteObjectCommand({ Bucket, Key: key }), { abortSignal: AbortSignal.timeout(8000) })
   }
-  async signDownload(key: string, expiresIn: number) {
+  async signDownload(key: string, expiresIn: number, format: ModelFormat) {
     const { client, Bucket } = this.ready()
     return getSignedUrl(client, new GetObjectCommand({
-      Bucket, Key: key, ResponseContentDisposition: 'attachment; filename="converted.glb"', ResponseContentType: 'application/octet-stream',
+      Bucket, Key: key, ResponseContentDisposition: 'attachment; filename="converted.' + format.toLowerCase() + '"', ResponseContentType: 'application/octet-stream',
     }), { expiresIn })
   }
   onModuleDestroy() { this.client?.destroy() }
