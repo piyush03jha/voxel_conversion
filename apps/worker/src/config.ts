@@ -14,7 +14,7 @@ function int(name: string, fallback: number, min: number, max: number) {
 export function workerConfig() {
   const endpoint = required('STORAGE_ENDPOINT')
   const parsed = new URL(endpoint)
-  if (parsed.protocol !== 'https:' && !(process.env.NODE_ENV !== 'production' && parsed.protocol === 'http:' && ['localhost', '127.0.0.1', 'minio'].includes(parsed.hostname))) throw new Error('Unsafe storage endpoint')
+  if (parsed.protocol !== 'https:' && !(process.env.NODE_ENV !== 'production' && parsed.protocol === 'http:' && ['localhost', '127.0.0.1', 'storage'].includes(parsed.hostname))) throw new Error('Unsafe storage endpoint')
   const sandbox = process.env.WORKER_SANDBOX ?? (process.env.NODE_ENV === 'production' ? 'bwrap' : 'trusted-local')
   if (sandbox !== 'bwrap' && sandbox !== 'trusted-local') throw new Error('Invalid WORKER_SANDBOX')
   if (process.env.NODE_ENV === 'production' && sandbox !== 'bwrap') throw new Error('Production imports require a filesystem/network sandbox')

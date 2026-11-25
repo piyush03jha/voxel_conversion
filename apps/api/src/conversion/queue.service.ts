@@ -68,7 +68,14 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const redis = new Redis(url, { lazyConnect: true, maxRetriesPerRequest: 1, connectTimeout: 5000, commandTimeout: 10000 })
     redis.on('error', () => this.log.warn('Redis connection error'))
     this.redis = redis
-    await redis.connect()
+    try { await redis.connect() }
+    catch {
+      redis.disconnect()
+      this.redis = undefined
+      if (this.config.acceptJobs) throw new Error('Redis unavailable. For local development run npm run infra:up and verify docker compose ps before starting the API.')
+      this.log.warn('Redis unavailable; server conversion disabled. Browser conversion remains available. Restart API after starting infrastructure.')
+      return
+    }
     this.queue = new Queue<ConversionJobData, ConversionJobResult>(QUEUE_NAME, {
       connection: redis,
       defaultJobOptions: { attempts: 1, removeOnComplete: false, removeOnFail: false },

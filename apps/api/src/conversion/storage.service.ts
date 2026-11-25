@@ -15,7 +15,7 @@ export class StorageService implements OnModuleDestroy {
     const secretAccessKey = process.env.STORAGE_SECRET_ACCESS_KEY
     if (endpoint && accessKeyId && secretAccessKey && this.bucket) {
       const parsed = new URL(endpoint)
-      if (parsed.protocol !== 'https:' && !(process.env.NODE_ENV !== 'production' && parsed.protocol === 'http:' && ['localhost', '127.0.0.1', 'minio'].includes(parsed.hostname))) throw new Error('Storage endpoint must use HTTPS in production')
+      if (parsed.protocol !== 'https:' && !(process.env.NODE_ENV !== 'production' && parsed.protocol === 'http:' && ['localhost', '127.0.0.1', 'storage'].includes(parsed.hostname))) throw new Error('Storage endpoint must use HTTPS in production')
       this.client = new S3Client({
         endpoint, region: process.env.STORAGE_REGION ?? 'auto',
         forcePathStyle: process.env.STORAGE_FORCE_PATH_STYLE !== 'false',

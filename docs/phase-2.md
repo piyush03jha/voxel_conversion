@@ -3,11 +3,11 @@
 ## Local development
 
 1. Use Node 22.12+ and Docker Compose. Run npm run setup (updates apps/api/package-lock.json for the new dependencies; commit it before deployment).
-2. Copy .env.example to .env. Run npm run infra:up and check docker compose logs minio-init. Bucket formshift-temp is private; do not make it public.
+2. Copy .env.example to .env. Run npm run infra:up and check docker compose logs storage-init. Bucket formshift-temp is private; do not make it public.
 3. For an isolated smoke test only, change QUEUE_ACCEPT_JOBS=true in .env. Run npm run dev:api. Run npm run smoke:queue in another terminal. No worker should be running. Set QUEUE_TEST_MODE=true as well; Phase 3 otherwise requires a worker heartbeat. The current worker supports all existing ADVFX inputs to GLB and optional compression; see phase-3.md and phase-5.md. Queue-only mode is blocked when NODE_ENV=production.
 4. Run npm test, npm run build, npm run lint. Reset QUEUE_ACCEPT_JOBS=false before public use.
 
-Local MinIO console: http://127.0.0.1:9001. The sample credentials and latest MinIO tags are for local development only. Redis is bound to loopback, uses noeviction and a persistent volume. Never expose Redis publicly.
+Local SeaweedFS S3 endpoint: http://127.0.0.1:9000. The sample credentials and pinned local image are for development only. The init service configures CORS and lifecycle and verifies conditional signed writes. See local-infra.md. Redis is bound to loopback, uses noeviction and a persistent volume. Never expose Redis publicly.
 
 ## API
 
