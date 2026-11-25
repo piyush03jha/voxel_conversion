@@ -1,0 +1,34 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+    ports: ["127.0.0.1:6379:6379"]
+    volumes: ["redis-data:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: formshiftlocal
+      MINIO_ROOT_PASSWORD: formshift-local-dev-password
+      MINIO_API_CORS_ALLOW_ORIGIN: http://localhost:5173
+    ports: ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
+    volumes: ["minio-data:/data"]
+  minio-init:
+    image: minio/mc:latest
+    depends_on: [minio]
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        until mc alias set local http://minio:9000 formshiftlocal formshift-local-dev-password; do sleep 2; done
+        mc mb --ignore-existing local/formshift-temp
+        mc ilm rule add --expire-days 2 local/formshift-temp
+    restart: "no"
+volumes:
+  redis-data:
+  minio-data:
