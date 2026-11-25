@@ -32,7 +32,7 @@ async function main() {
   let closing = false
   connection.on('error', () => { active?.abort(); console.error('Worker Redis connection error') })
   heartbeatRedis.on('error', () => { active?.abort(); console.error('Worker heartbeat unavailable') })
-  const worker = new Worker<ConversionJobData, ConversionJobResult>(QUEUE_NAME, async (job) => {
+  const worker = new Worker<ConversionJobData, ConversionJobResult>(QUEUE_NAME, async (job, token) => {
     checkJob(job.id, job.data)
     const budget = Math.min(config.timeoutMs, job.data.expiresAt - Date.now())
     if (budget <= 0 || closing) throw new Error('EXPIRED_OR_SHUTTING_DOWN')
@@ -40,19 +40,37 @@ async function main() {
     active = controller
     const timer = setTimeout(() => controller.abort(), budget)
     let dir: string | undefined
+    // Race progress/lock calls against the job deadline even if Redis is reconnecting.
+    function bounded<T>(operation: Promise<T>): Promise<T> {
+      const signal = controller.signal
+      return new Promise<T>((resolve, reject) => {
+        const abort = () => reject(new Error('JOB_DEADLINE'))
+        signal.addEventListener('abort', abort, { once: true })
+        if (signal.aborted) abort()
+        operation.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort))
+      })
+    }
+    async function ownLock() {
+      controller.signal.throwIfAborted()
+      if (!token || await bounded(job.extendLock(token, 120000)) !== 1) throw new Error('JOB_LOCK_LOST')
+    }
     try {
+      await ownLock()
       dir = await mkdtemp(join(config.workRoot, 'formshift-job-'))
       const input = join(dir, 'input.stl'), output = join(dir, 'output.glb')
-      await job.updateProgress(5)
+      await bounded(job.updateProgress(5))
       await downloadInput(storage, config, job.data, input, controller.signal)
-      await job.updateProgress(25)
+      await bounded(job.updateProgress(25))
       await runConverter(config, dir, input, output, controller.signal)
       const outputBytes = await verifyGlb(output, config.maxOutputBytes)
       controller.signal.throwIfAborted()
-      await job.updateProgress(85)
+      await bounded(job.updateProgress(85))
+      await ownLock()
       await uploadOutput(storage, config, job.data, output, outputBytes, controller.signal)
       controller.signal.throwIfAborted()
-      await job.updateProgress(100)
+      await ownLock()
+      await bounded(job.updateProgress(100))
+      controller.signal.throwIfAborted()
       return { outputBytes }
     } catch {
       // Never persist paths, signed URLs, credentials or parser output in BullMQ failures.

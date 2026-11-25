@@ -4,7 +4,9 @@ export function intEnv(name: string, fallback: number, min: number, max: number)
   if (!Number.isSafeInteger(value) || value < min || value > max) throw new Error('Invalid ' + name)
   return value
 }
-export const settings = () => ({
+export const settings = () => {
+  if (process.env.NODE_ENV === 'production' && process.env.QUEUE_TEST_MODE === 'true') throw new Error('QUEUE_TEST_MODE is prohibited in production')
+  return ({
   queueTestMode: process.env.QUEUE_TEST_MODE === 'true',
   acceptJobs: process.env.QUEUE_ACCEPT_JOBS === 'true',
   capacity: intEnv('QUEUE_CAPACITY', 100, 1, 100),
@@ -13,3 +15,4 @@ export const settings = () => ({
   createsPerMinute: intEnv('UPLOADS_PER_MINUTE', 30, 1, 100),
   downloadSeconds: intEnv('DOWNLOAD_URL_TTL_SECONDS', 300, 30, 900),
 })
+}

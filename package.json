@@ -18,6 +18,7 @@
     "smoke:queue": "npm run smoke:queue --prefix apps/api",
     "dev:worker": "npm run build --prefix apps/api && npm run start:worker --prefix apps/api",
     "worker:up": "docker compose --profile worker up -d --build --scale worker=2 worker",
-    "smoke:conversion": "npm run smoke:conversion --prefix apps/api"
+    "smoke:conversion": "npm run smoke:conversion --prefix apps/api",
+    "test:native": "python3 apps/worker/scripts/test-native.py"
   }
 }
