@@ -5,6 +5,7 @@ import { Queue } from 'bullmq'
 import type { ConversionJobData, ConversionJobResult } from '../../../../packages/shared/src/jobs'
 import { getCompressionLevels } from '../../../../packages/shared/src/compatibility'
 import { QUEUE_NAME, WORKER_HEARTBEATS, isWorkerRoute } from '../../../../packages/shared/src/jobs'
+import { estimateWaitSeconds } from './queue-estimate'
 import { settings } from './config'
 import { StorageService, UPLOAD_HEADERS } from './storage.service'
 import { tokenHash, validateUpload } from './validation'
@@ -52,6 +53,8 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   private timer?: ReturnType<typeof setInterval>
   private sweepTask?: Promise<void>
   private closing = false
+  private estimateCache?: { at: number; samples: number[]; activeElapsed: number[]; workers: number }
+  private estimateTask?: Promise<void>
   constructor(private readonly storage: StorageService) {}
 
   async onModuleInit() {
@@ -178,6 +181,23 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       return { id, status: published ? await published.getState() : 'waiting' }
     })
   }
+  private async waitingEstimate(position: number) {
+    if (this.config.queueTestMode) return null
+    const now = Date.now()
+    if (!this.estimateCache || now - this.estimateCache.at >= 10000) {
+      if (!this.estimateTask) this.estimateTask = (async () => {
+        const { queue } = this.ready()
+        const [completed, active, workers] = await Promise.all([queue.getCompleted(0,49),queue.getActive(0,99),this.workerCount()])
+        const at=Date.now()
+        const samples=completed.flatMap(job => typeof job.processedOn==='number' && typeof job.finishedOn==='number' && at-job.finishedOn<=3600000 ? [job.finishedOn-job.processedOn] : [])
+        this.estimateCache={at,samples,workers,activeElapsed:active.map(job=>typeof job.processedOn==='number'?Math.max(0,at-job.processedOn):0)}
+      })().catch(()=>{this.estimateCache=undefined}).finally(()=>{this.estimateTask=undefined})
+      await this.estimateTask
+    }
+    const cache=this.estimateCache
+    if(!cache)return null
+    return estimateWaitSeconds(position,cache.workers,cache.samples,cache.activeElapsed)
+  }
   async status(id: string, authorization?: string) {
     const s = await this.authorized(id, authorization)
     if (s.cancelled) return { id, status: 'cancelled' }
@@ -186,16 +206,17 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const job = await queue.getJob(id)
     if (!job) return { id, status: Date.now() >= s.uploadUntil ? 'expired' : 'awaiting-upload', originalBytes: s.originalBytes }
     const state = await job.getState()
-    // Position is a snapshot; no ETA until actual processing metrics exist.
+    // Queue position and approximate time to start, based on recent completed jobs.
     let position: number | null = null
     if (state === 'waiting') {
       const waiting = await queue.getWaiting(0, this.config.capacity - 1)
       const index = waiting.findIndex((item) => item.id === id)
       if (index >= 0) position = index + 1
     }
+    const etaSeconds = position === null ? null : await this.waitingEstimate(position)
     const outputBytes = state === 'completed' && Number.isSafeInteger(job.returnvalue?.outputBytes) && job.returnvalue.outputBytes > 0 ? job.returnvalue.outputBytes : null
     const convertedBytes = state === 'completed' && Number.isSafeInteger(job.returnvalue?.convertedBytes) && job.returnvalue.convertedBytes > 0 ? job.returnvalue.convertedBytes : null
-    return { id, status: state, outputFormat: s.outputFormat, position, etaSeconds: null, convertedBytes, compressionApplied: state === 'completed' ? job.returnvalue?.compressionApplied ?? false : null, warning: state === 'completed' ? job.returnvalue?.warning ?? null : null, compressionReductionPercent: outputBytes !== null && convertedBytes !== null ? Math.round((1 - outputBytes / convertedBytes) * 10000) / 100 : null, error: state === 'failed' ? 'Conversion failed. Check the input file, missing dependencies or model complexity.' : null, progress: typeof job.progress === 'number' ? job.progress : null, originalBytes: s.originalBytes, outputBytes, reductionPercent: outputBytes === null ? null : Math.round((1 - outputBytes / s.originalBytes) * 10000) / 100 }
+    return { id, status: state, outputFormat: s.outputFormat, position, etaSeconds, convertedBytes, compressionApplied: state === 'completed' ? job.returnvalue?.compressionApplied ?? false : null, warning: state === 'completed' ? job.returnvalue?.warning ?? null : null, compressionReductionPercent: outputBytes !== null && convertedBytes !== null ? Math.round((1 - outputBytes / convertedBytes) * 10000) / 100 : null, error: state === 'failed' ? 'Conversion failed. Check the input file, missing dependencies or model complexity.' : null, progress: typeof job.progress === 'number' ? job.progress : null, originalBytes: s.originalBytes, outputBytes, reductionPercent: outputBytes === null ? null : Math.round((1 - outputBytes / s.originalBytes) * 10000) / 100 }
   }
   async cancel(id: string, authorization?: string) {
     await this.authorized(id, authorization)

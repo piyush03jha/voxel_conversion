@@ -11,7 +11,7 @@ This is an explicit scope change: perform eligible conversions locally; use the 
 
 ## UI
 
-Select source and target → automatic engine label → local worker or signed upload → submit → poll queue/progress/status → download. Browser output is a Blob; download uses a temporary object URL. Server downloads request a signed URL only when clicked. Credentials remain in component memory, never localStorage or URL parameters. Switching files/settings clears previous results. Local cancellation terminates the worker; server cancellation only works for unsubmitted/waiting jobs. Active cancellation is not supported; a rejected cancellation leaves tracking running. Closing/reloading the page loses the job token; objects expire under the existing retention policy. ETA remains unavailable until actual processing statistics exist.
+Select source and target → automatic engine label → local worker or signed upload → submit → poll queue/progress/status → download. Browser output is a Blob; download uses a temporary object URL. Server downloads request a signed URL only when clicked. Credentials remain in component memory, never localStorage or URL parameters. Switching files/settings clears previous results. Local cancellation terminates the worker; server cancellation only works for unsubmitted/waiting jobs. Active cancellation is not supported; a rejected cancellation leaves tracking running. Closing/reloading the page loses the job token; objects expire under the existing retention policy. ETA is estimated from recent completed server jobs after at least three valid samples; the UI otherwise shows unavailable.
 
 ## Verification
 
