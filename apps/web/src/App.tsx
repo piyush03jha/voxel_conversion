@@ -30,7 +30,7 @@ function App() {
   const [outputFormat, setOutputFormat] = useState('GLB')
   const [apiOnline, setApiOnline] = useState(false)
   const [serverReady, setServerReady] = useState(false)
-  const { state: job, start, reset, cancelCurrent, downloadResult, downloading, downloadError } = useConversion()
+  const { state: job, start, reset, cancelCurrent, downloadResult, downloading, downloadError, resumeTracking, pauseTracking } = useConversion()
 
   useEffect(() => {
     const controller = new AbortController()
@@ -58,15 +58,15 @@ function App() {
 
   const local = !!file && !!inputFormat && browserRoute(inputFormat, selectedOutput, file.size, compression)
   const route = local ? 'browser' : 'server'
-  const ready = !!file && !job.busy && (local || serverReady)
+  const ready = !!file && !job.busy && !job.canResume && !downloading && (local || serverReady)
   const reduction = job.result ? (1 - job.result.bytes / job.result.originalBytes) * 100 : null
   function begin(forceServer = false) {
-    if (!file || !inputFormat || job.busy || (forceServer ? !serverReady : !ready)) return
+    if (!file || !inputFormat || job.busy || job.canResume || downloading || (forceServer ? !serverReady : !ready)) return
     void start(file, inputFormat, selectedOutput, compression, forceServer ? 'server' : route)
   }
 
   function selectFile(candidate?: File) {
-    if (!candidate || job.busy) return
+    if (!candidate || job.busy || job.canResume || downloading) return
     reset()
 
     if (candidate.size === 0) {
@@ -146,7 +146,7 @@ function App() {
               ref={fileInputRef}
               className="visually-hidden"
               type="file"
-              disabled={job.busy}
+              disabled={job.busy || job.canResume || downloading}
               accept={ACCEPTED_FORMATS.map((format) => `.${format.toLowerCase()}`).join(',')}
               onChange={(event) => {
                 selectFile(event.currentTarget.files?.[0])
@@ -170,7 +170,7 @@ function App() {
                 </>
               )}
             </div>
-            {file && <button className="remove-file" type="button" disabled={job.busy} onClick={() => { setFile(null); setFileError(''); reset() }} aria-label="Remove selected file">×</button>}
+            {file && <button className="remove-file" type="button" disabled={job.busy || job.canResume || downloading} onClick={() => { setFile(null); setFileError(''); reset() }} aria-label="Remove selected file">×</button>}
           </div>
           {fileError && <p className="error-message" role="alert">{fileError}</p>}
 
@@ -182,7 +182,7 @@ function App() {
             <span className="format-arrow" aria-hidden="true">→</span>
             <div className="format-select output-format">
               <span className="field-label">TO</span>
-              <div className="format-value"><select aria-label="Output format" value={selectedOutput} disabled={!outputs.length || job.busy} onChange={(event) => { setOutputFormat(event.target.value); setCompression('None'); reset() }}>{(outputs.length ? outputs : ['GLB']).map((format) => <option key={format} value={format}>{format}</option>)}</select><span>Selected export</span></div>
+              <div className="format-value"><select aria-label="Output format" value={selectedOutput} disabled={!outputs.length || job.busy || job.canResume || downloading} onChange={(event) => { setOutputFormat(event.target.value); setCompression('None'); reset() }}>{(outputs.length ? outputs : ['GLB']).map((format) => <option key={format} value={format}>{format}</option>)}</select><span>Selected export</span></div>
             </div>
           </div>
           <p className="format-footnote">Choose a compatible output. {outputWarning ?? 'Format conversion may change materials or geometry.'}</p>
@@ -219,7 +219,7 @@ function App() {
                   type="button"
                   key={level}
                   aria-pressed={compression === level}
-                  disabled={job.busy || !compressionLevels.includes(level)}
+                  disabled={job.busy || job.canResume || downloading || !compressionLevels.includes(level)}
                   onClick={() => { setCompression(level); reset() }}
                 >{level}</button>
               ))}
@@ -247,7 +247,7 @@ function App() {
 
           <div className="queue-card" aria-live="polite">
             <div className="queue-top"><span className="queue-dot" /> {job.route ? job.route === 'browser' ? 'BROWSER PROCESSING' : 'SERVER PROCESSING' : !file ? 'SELECT A FILE' : local ? 'BROWSER FIRST' : 'SERVER REQUIRED'}</div>
-            <p>{job.busy || job.result || job.error ? job.stage : !file ? 'The converter selects the processing engine automatically.' : local ? 'Eligible for local conversion. Your file will not be uploaded; unsupported content requires explicit server fallback.' : serverReady ? 'This file or setting requires the server. Convert will upload to private temporary storage.' : 'This conversion requires the server, which is currently unavailable.'}</p>
+            <p>{job.busy || job.result || job.error || job.canResume ? job.stage : !file ? 'The converter selects the processing engine automatically.' : local ? 'Eligible for local conversion. Your file will not be uploaded; unsupported content requires explicit server fallback.' : serverReady ? 'This file or setting requires the server. Convert will upload to private temporary storage.' : 'This conversion requires the server, which is currently unavailable.'}</p>
             {job.progress !== null && <progress className="job-progress" value={job.progress} max={100} aria-label="Conversion stage progress" />}
             <div className="queue-meta"><span>QUEUE <b>{job.position ?? '—'}</b></span><span>EST. WAIT <b>{job.eta === null ? '—' : job.eta < 60 ? job.eta + ' sec' : Math.ceil(job.eta / 60) + ' min'}</b></span></div>
             {job.result?.convertedBytes != null && job.result.convertedBytes > 0 && job.route === 'server' && <p>Before compression: {formatBytes(job.result.convertedBytes)} · reduction: {((1 - job.result.bytes / job.result.convertedBytes) * 100).toFixed(1)}%</p>}
@@ -256,12 +256,14 @@ function App() {
           </div>
 
           <button className="convert-button" type="button" disabled={!ready || downloading} onClick={() => begin()}>
-            <span>{job.busy ? job.stage : !file ? 'Add a file to continue' : local ? 'Convert in browser' : 'Convert on server'}</span>
+            <span>{job.busy || job.canResume ? job.stage : !file ? 'Add a file to continue' : local ? 'Convert in browser' : 'Convert on server'}</span>
             <span aria-hidden="true">↗</span>
           </button>
-          {job.busy && job.stage !== 'Converting on server' && <button className="job-action" type="button" onClick={() => void cancelCurrent()}>Cancel</button>}
+          {job.busy && job.serverStatus !== 'active' && <button className="job-action" type="button" onClick={() => void cancelCurrent()}>Cancel</button>}
+          {job.busy && job.route === 'server' && (job.serverStatus !== null || job.stage === 'Reconnecting to server' || job.stage === 'Submitting job') && <button className="job-action" type="button" onClick={pauseTracking}>Pause status tracking (job may continue)</button>}
+          {job.canResume && <><button className="job-action" type="button" onClick={() => void resumeTracking()}>Resume tracking</button><button className="job-action" type="button" onClick={reset}>Forget job (may continue on server)</button></>}
           {job.fallback && !job.busy && <button className="job-action" type="button" disabled={!serverReady} onClick={() => begin(true)}>Upload and convert on server instead</button>}
-          {job.busy && job.stage === 'Converting on server' && <p className="privacy-note">Active server conversions cannot be cancelled yet.</p>}
+          {job.busy && job.serverStatus === 'active' && <p className="privacy-note">Active server conversions cannot be cancelled yet.</p>}
           {job.result && <button className="job-action download-action" type="button" disabled={downloading} onClick={() => void downloadResult()}>{downloading ? 'Preparing download…' : 'Download ' + selectedOutput}</button>}
           {downloadError && <p className="error-message" role="alert">{downloadError}</p>}
           <p className="privacy-note"><span aria-hidden="true">⌑</span> {job.route === 'browser' || (!job.route && local) ? 'Local conversion: no model upload' : 'Server files are temporary; downloads expire'}</p>

@@ -88,12 +88,14 @@ export async function preparePreview(bytes:ArrayBuffer,format:ModelFormat):Promi
   const nodes=sourceNodes.map(value=>{
     const node=dict(value),out:Dict={}
     if(node.mesh!==undefined)out.mesh=integer(node.mesh,0,meshes.length-1)
-    if(node.children!==undefined)out.children=arr(node.children).map(v=>integer(v,0,sourceNodes.length-1))
+    if(node.children!==undefined){const children=arr(node.children);if(children.length>512)reject();out.children=children.map(v=>integer(v,0,sourceNodes.length-1))}
     if(node.matrix!==undefined)out.matrix=finiteArray(node.matrix,16)
     else for(const [key,length] of [['translation',3],['rotation',4],['scale',3]] as const)if(node[key]!==undefined)out[key]=finiteArray(node[key],length)
     return out
   })
-  const roots=arr(dict(scenes[integer(doc.scene??0,0,scenes.length-1)]).nodes).map(v=>integer(v,0,nodes.length-1))
+  const rootValues=arr(dict(scenes[integer(doc.scene??0,0,scenes.length-1)]).nodes)
+  if(rootValues.length>512)reject()
+  const roots=rootValues.map(v=>integer(v,0,nodes.length-1))
   const visited=new Set<number>()
   let displayed=0
   function visit(id:number,depth:number){
