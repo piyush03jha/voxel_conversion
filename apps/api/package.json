@@ -9,14 +9,19 @@
     "build": "tsc -p tsconfig.json",
     "start": "npm run build && npm run start:prod",
     "start:prod": "node --env-file-if-exists=../../.env dist/apps/api/src/main.js",
-    "test": "npm run build && node --test dist/apps/api/src/compatibility.test.js"
+    "test": "npm run build && node --test dist/apps/api/src/*.test.js",
+    "smoke:queue": "node --env-file-if-exists=../../.env scripts/smoke-queue.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.0",
     "@nestjs/core": "^11.1.0",
     "@nestjs/platform-express": "^11.1.0",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "@aws-sdk/client-s3": "^3.850.0",
+    "@aws-sdk/s3-request-presigner": "^3.850.0",
+    "bullmq": "^5.56.0",
+    "ioredis": "^5.6.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

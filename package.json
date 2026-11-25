@@ -12,6 +12,9 @@
     "dev:api": "npm run start --prefix apps/api",
     "build": "npm run build --prefix apps/web && npm run build --prefix apps/api",
     "lint": "npm run lint --prefix apps/web",
-    "test": "npm run test --prefix apps/api"
+    "test": "npm run test --prefix apps/api",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "smoke:queue": "npm run smoke:queue --prefix apps/api"
   }
 }

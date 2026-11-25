@@ -5,11 +5,12 @@ import { AppModule } from './app.module'
 async function bootstrap() {
   const app = await NestFactory.create(AppModule)
   app.setGlobalPrefix('api')
+  // Metadata only: Nest's default JSON body limit is 100 KiB. No upload middleware.
   const origins = (process.env.WEB_ORIGINS ?? 'http://localhost:5173').split(',').map((value) => value.trim()).filter(Boolean)
-  app.enableCors({ origin: origins, methods: ['GET', 'OPTIONS'] })
+  app.enableCors({ origin: origins, methods: ['GET', 'POST', 'DELETE', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization'] })
   app.enableShutdownHooks()
   const port = Number(process.env.PORT ?? 3001)
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid PORT')
-  await app.listen(port, '0.0.0.0')
+  await app.listen(port, process.env.HOST ?? (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1'))
 }
 void bootstrap().catch((error) => { console.error(error); process.exit(1) })
