@@ -162,13 +162,13 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
       // The uncertain job owns the one server slot; resume it first.
       candidates.sort((a,b)=>Number(!!b.pending)-Number(!!a.pending)||a.id-b.id)
       for(const row of candidates){if(stop.current||controller.signal.aborted)break;setMessage('Processing '+row.model.asset.path);if(!await processRow(row,controller.signal))break}
-      setMessage(stop.current?'Stopped after current file. Completed files remain downloadable.':'Batch pass finished. Download results or retry failed files.')
+      setMessage(rowsRef.current.some(row=>row.pending)?'Tracking paused. Resume the existing server job before continuing.':stop.current?'Stopped after current file. Completed files remain downloadable.':'Batch pass finished. Download results or retry failed files.')
     }catch(e){if(!controller.signal.aborted)setError(e instanceof Error?e.message:'Batch processing interrupted')}
     finally{if(active.current===controller)active.current=null;if(alive.current){setWorking(false);setStopRequested(false)}}
   }
   async function downloadOne(row:Row){
     if(!row.result)return
-    try{if(row.result.blob)trigger(URL.createObjectURL(row.result.blob),row.result.name,true);else if(row.result.session){const signed=await api.download(row.result.session);trigger(signed.url,row.result.name)}}
+    try{const blob=row.result.blob??cachedResults.current.get(row.id);if(blob)trigger(URL.createObjectURL(blob),row.result.name,true);else if(row.result.session){const signed=await api.download(row.result.session);trigger(signed.url,row.result.name)}}
     catch(e){setError(e instanceof Error?e.message:'Download unavailable')}
   }
   async function downloadAll(){
@@ -204,7 +204,7 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
     if(pending){setError('Resume the unfinished server job before clearing this batch, or leave the page to let it expire.');return}
     replace([]);batch.current=null;setMessage('');setError('')
     await scratch.current.close();scratch.current=new Scratch()
-    await resultScratch.current.close();resultScratch.current=new Scratch()
+    await resultScratch.current.close();resultScratch.current=new Scratch();cachedResults.current.clear()
   }
   const chosen=rows.find(row=>row.id===selected),completed=rows.filter(r=>r.state==='done').length
   const changeCommon=(value:ModelFormat)=>{setCommon(value);replace(rowsRef.current.map(row=>row.state==='done'||row.pending?row:{...row,target:value,state:'ready',stage:'Ready',error:undefined}))}

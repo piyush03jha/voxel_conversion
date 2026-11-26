@@ -179,6 +179,7 @@ function SingleWorkspace() {
             {file && <button className="remove-file" type="button" disabled={job.busy || job.canResume || downloading} onClick={() => { setFile(null); setFileError(''); reset() }} aria-label="Remove selected file">×</button>}
           </div>
           {fileError && <p className="error-message" role="alert">{fileError}</p>}
+          <p className="format-footnote" style={{marginTop:12,marginBottom:16}}>Have multiple models, textures, a folder or ZIP? <a className="tool-link" href={compressPage?'/compress/batch':'/batch'} aria-disabled={locked} onClick={event=>{if(locked)event.preventDefault()}}>Open batch {compressPage?'compression':'conversion'}</a>.</p>
 
           <div className="preview-heading">
             <div>
