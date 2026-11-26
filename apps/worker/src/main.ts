@@ -15,7 +15,7 @@ async function main() {
   const config = workerConfig()
   if (process.platform !== 'linux') throw new Error('Use a Linux or Docker worker')
   await access(config.workRoot, constants.W_OK)
-  for (const script of ['validate-stl.py', 'validate-input.py', 'dense-mesh-to-glb.py', 'threemf-to-glb.py', 'blender-convert.py', 'export_handlers.py', 'embed-gltf.py', 'verify-output.py', 'preview_mesh.py']) await access(join(config.scriptsDir, script), constants.R_OK)
+  for (const script of ['validate-stl.py', 'validate-input.py', 'dense-mesh-to-glb.py', 'threemf-to-glb.py', 'blender-convert.py', 'export_handlers.py', 'embed-gltf.py', 'verify-output.py', 'preview_mesh.py', 'stream-stl-glb.py', 'repack-3mf.py']) await access(join(config.scriptsDir, script), constants.R_OK)
   // Verify executable availability before announcing a worker.
   const { spawnSync } = await import('node:child_process')
   for (const executable of ['prlimit', config.python, config.blender, config.optimizer, 'pdftocairo', 'rsvg-convert', ...(config.sandbox === 'bwrap' ? ['bwrap'] : [])]) {
@@ -72,8 +72,11 @@ async function main() {
       await bounded(job.updateProgress(100))
       controller.signal.throwIfAborted()
       return { outputBytes: result.outputBytes, convertedBytes: result.convertedBytes, compressionApplied: result.compressionApplied, warning: result.warning }
-    } catch {
-      // Never persist paths, signed URLs, credentials or parser output in BullMQ failures.
+    } catch (error) {
+      // Persist only a fixed allowlist, not file paths or parser stderr.
+      const reason=error instanceof Error?error.message:''
+      if(controller.signal.aborted)throw new Error('JOB_DEADLINE_OR_INTERRUPTED')
+      if(['PROCESS_RESOURCE_LIMIT','INVALID_OR_COMPLEX_MODEL','INVALID_OUTPUT','INVALID_GLB_JSON','INVALID_GLB_CONTENT','INVALID_GLB_BIN','INPUT_CHANGED','INPUT_SIZE_MISMATCH'].includes(reason))throw new Error(reason)
       throw new Error('CONVERSION_FAILED')
     } finally {
       clearTimeout(timer)

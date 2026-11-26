@@ -8,7 +8,7 @@ import sys
 import zipfile
 import os
 
-MAX_UNPACKED = 512 * 1024 * 1024
+MAX_UNPACKED = int(os.environ.get('WORKER_MAX_ARCHIVE_MB', '512')) * 1024 * 1024
 MAX_FILES = 5000
 
 def archive(path):

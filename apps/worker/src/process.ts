@@ -19,6 +19,9 @@ function environment(config: WorkerConfig, dir: string) {
     OMP_NUM_THREADS: String(config.threads), OPENBLAS_NUM_THREADS: String(config.threads),
     VOXEL3D_GLTF_MAX_FACES: '0', VOXEL3D_DENSE_MAX_TRIANGLES: String(config.maxTriangles),
     VOXEL3D_DENSE_MAX_CELLS: String(config.maxCells),
+    VOXEL3D_3MF_MAX_TRIANGLES: String(config.maxTriangles),
+    VOXEL3D_3MF_MAX_XML_MB: String(config.maxArchiveMb),
+    WORKER_MAX_ARCHIVE_MB: String(config.maxArchiveMb),
     WORKER_MAX_TRIANGLES: String(config.maxTriangles),
     NODE_OPTIONS: '--max-old-space-size=' + config.optimizerHeapMb,
     PDF_TO_SVG_BIN: '/usr/bin/pdftocairo',
@@ -37,7 +40,7 @@ function sandboxCommand(config: WorkerConfig, dir: string, args: string[]): stri
     '--chdir', dir, '--', ...args]
 }
 class ConverterExit extends Error {
-  constructor(readonly code: number | null) { super('INVALID_OR_COMPLEX_MODEL') }
+  constructor(readonly code: number | null) { super(code === null ? 'PROCESS_RESOURCE_LIMIT' : 'INVALID_OR_COMPLEX_MODEL') }
 }
 async function run(config: WorkerConfig, dir: string, args: string[], signal: AbortSignal, addressMb: number | null) {
   if (process.platform !== 'linux') throw new Error('LINUX_WORKER_REQUIRED')
@@ -83,6 +86,17 @@ export async function runConverter(config: WorkerConfig, dir: string, input: str
   if (format === 'STL') await run(config, dir, [config.python, '-I', join(config.scriptsDir, 'validate-stl.py'), input], signal, config.memoryMb)
   else await run(config, dir, [config.python, '-I', join(config.scriptsDir, 'validate-input.py'), input, ext], signal, config.memoryMb)
   if (format === 'GLB') { await readGlbInfo(input, config.maxOutputBytes); return input }
+  if (format === 'STL' && (await stat(input)).size >= 30 * 1024 * 1024) {
+    const handle=await open(input,'r')
+    try {
+      const header=Buffer.alloc(84)
+      const {bytesRead}=await handle.read(header,0,84,0)
+      if(bytesRead===84 && 84+50*header.readUInt32LE(80)===(await handle.stat()).size) {
+        await run(config,dir,[config.python,'-I',join(config.scriptsDir,'stream-stl-glb.py'),input,output],signal,config.memoryMb)
+        return output
+      }
+    } finally { await handle.close() }
+  }
   let native: string[] | null = null
   if (format === '3MF') native = ['threemf-to-glb.py']
   if (format === 'PLY' || (format === 'STL' && config.engine === 'native')) native = ['dense-mesh-to-glb.py', '--ext', ext]
@@ -180,6 +194,16 @@ export async function convertJob(config: WorkerConfig, dir: string, input: strin
     const bytes = await verifyOther(config, dir, path, target, signal)
     return { path, convertedBytes: bytes, outputBytes: bytes, compressionApplied: false, warning }
   }
+  if (source === '3MF' && target === '3MF' && level !== 'None') {
+    const original=(await stat(input)).size
+    const candidate=join(dir,'repacked.3mf')
+    try {
+      await run(config,dir,[config.python,'-I',join(config.scriptsDir,'repack-3mf.py'),input,candidate,String({Low:1,Medium:6,High:9}[level])],signal,config.memoryMb)
+      const bytes=(await stat(candidate)).size
+      if(bytes>0&&bytes<original)return {path:candidate,convertedBytes:original,outputBytes:bytes,compressionApplied:true,warning:'Lossless 3MF ZIP recompression; model entries preserved.'}
+    } catch { signal.throwIfAborted() }
+    return {path:input,convertedBytes:original,outputBytes:original,compressionApplied:false,warning:'Original 3MF package retained; no smaller lossless result.'}
+  }
   // Direct import → chosen exporter: no forced GLB roundtrip for these targets.
   const candidate = join(dir, 'optimized.' + target.toLowerCase())
   const args = [config.blender, '--background', '--factory-startup', '--disable-autoexec',
@@ -192,9 +216,13 @@ export async function convertJob(config: WorkerConfig, dir: string, input: strin
   if (level !== 'None' && existsSync(candidate)) {
     try {
       const candidateBytes = await verifyOther(config, dir, candidate, target, signal)
-      if (candidateBytes < bytes) return { path: candidate, convertedBytes: bytes, outputBytes: candidateBytes, compressionApplied: true, warning: [warning, target === '3MF' ? 'ZIP compression retained the mesh geometry.' : 'Static mesh simplification may reduce geometry detail.'].filter(Boolean).join(' ') }
+      if (candidateBytes < bytes && (source !== target || candidateBytes < (await stat(input)).size)) return { path: candidate, convertedBytes: bytes, outputBytes: candidateBytes, compressionApplied: true, warning: [warning, target === '3MF' ? 'ZIP compression retained the mesh geometry.' : 'Static mesh simplification may reduce geometry detail.'].filter(Boolean).join(' ') }
     } catch { signal.throwIfAborted() }
     await rm(candidate, { force: true })
+  }
+  if (source === target && level !== 'None') {
+    const original=(await stat(input)).size
+    if(bytes>=original)return {path:input,convertedBytes:original,outputBytes:original,compressionApplied:false,warning:'Original file retained; compression did not reduce the original file size.'}
   }
   return { path: output, convertedBytes: bytes, outputBytes: bytes, compressionApplied: false,
     warning: [warning, level !== 'None' ? 'Compression unavailable or not smaller; original export retained.' : null].filter(Boolean).join(' ') || null }
