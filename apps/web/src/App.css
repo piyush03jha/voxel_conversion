@@ -305,3 +305,5 @@
 .batch-preview .preview-window { height:clamp(440px,63vh,740px); }
 @media(max-width:900px){.batch-grid{grid-template-columns:minmax(0,1fr)}.batch-preview{position:static}.batch-shell .tool-nav{order:3;width:100%}.batch-shell .tool-nav a{flex:1;text-align:center}.batch-preview .preview-window{height:430px}}
 @media(max-width:560px){.batch-options{padding:12px;gap:12px}.batch-actions{width:100%}.batch-actions .convert-button,.batch-actions .job-action{width:100%}.batch-row{padding:10px}.batch-shell .tool-nav a{font-size:.875rem;padding:8px}.batch-upload{padding:12px}}
+
+.dependency-list{color:#aab9b2;font-size:.875rem;line-height:1.6}.dependency-list summary{cursor:pointer;color:var(--accent)}.dependency-list small{display:block;padding-left:12px}.batch-row-status label{color:#dce5e1}.batch-row-status input{accent-color:var(--accent)}

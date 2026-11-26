@@ -44,3 +44,13 @@ test('bundle metadata and separate operations',()=>{
   assert.throws(()=>validateUpload({...good,compression:'High'}))
   assert.throws(()=>validateUpload({filename:'a.obj',size:123,outputFormat:'OBJ',compression:'High',bundleEntry:'a.obj'}))
 })
+
+test('package conversion, preview and same-format lossless compression',()=>{
+  const source={filename:'root.gltf',size:12345,bundleEntry:'folder/root.gltf'}
+  assert.equal(validateUpload({...source,outputFormat:'GLB',purpose:'preview'}).purpose,'preview')
+  assert.equal(validateUpload({...source,outputFormat:'GLTF',compression:'Medium',packageOutput:true}).packageOutput,true)
+  assert.throws(()=>validateUpload({...source,outputFormat:'GLTF',compression:'Medium'}))
+  assert.throws(()=>validateUpload({...source,outputFormat:'GLB',compression:'High',packageOutput:true}))
+  assert.equal(validateUpload({filename:'a.fbx',size:123,outputFormat:'OBJ',packageOutput:true}).packageOutput,true)
+  assert.throws(()=>validateUpload({filename:'a.fbx',size:123,outputFormat:'GLB',packageOutput:true}))
+})

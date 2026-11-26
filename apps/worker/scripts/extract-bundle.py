@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract one dependency-aware OBJ/glTF bundle; never extract arbitrary archives."""
+"""Extract a selected model and bounded dependency assets; never arbitrary archives."""
 import json, os, pathlib, re, shutil, stat, struct, sys, zipfile
 from urllib.parse import unquote
 ALLOWED={".mtl",".bin",".png",".jpg",".jpeg",".webp",".tga",".bmp",".tif",".tiff",".exr",".hdr",".ktx2",".dds"}
@@ -41,7 +41,7 @@ def texture_reference(raw):
                 if not a:raise ValueError("missing option argument")
                 text=a.group(1)
     return text.strip()
-USD={".usd",".usda",".usdc",".usdz"}
+USD={".usd",".usda",".usdc"}
 def usd_refs(root,model,seen=None,visiting=None):
     if seen is None:seen=set();visiting=set()
     if model in visiting:raise ValueError("cyclic USD dependency")
@@ -54,8 +54,8 @@ def usd_refs(root,model,seen=None,visiting=None):
     if model.stat().st_size>8*1024**2:raise ValueError("USD text manifest limit")
     for ref in re.findall(r"@([^@\r\n]+)@",model.read_text(encoding="utf-8")):
         target=resolve(root,model.parent,ref)
-        if target.suffix.lower() in USD-{".usdz"}:usd_refs(root,target,seen,visiting)
-        elif target.suffix.lower() not in ALLOWED|{".usdz"}:raise ValueError("unsupported USD asset")
+        if target.suffix.lower() in USD:usd_refs(root,target,seen,visiting)
+        elif target.suffix.lower() not in ALLOWED:raise ValueError("unsupported USD asset")
     visiting.remove(model)
 def obj_refs(root,model):
     for line in lines(model):
@@ -69,8 +69,7 @@ def obj_refs(root,model):
             for line in lines(mtl):
                 fields=line.split(None,1)
                 if len(fields)!=2 or not (fields[0].lower().startswith("map_") or fields[0].lower() in ("bump","disp","decal","refl","norm")):continue
-                # Only common unambiguous path references. Reject options rather than
-                # risk a different interpretation by Blender.
+                # Known standard map options are parsed; unknown options fail closed.
                 ref=texture_reference(fields[1])
                 target=resolve(root,mtl.parent,ref)
                 if target.suffix.lower() not in ALLOWED-{".mtl",".bin"}:raise ValueError("invalid texture")
@@ -113,7 +112,15 @@ def extract(source,dest,entry):
             if total>LIMIT or (info.file_size>8*1024**2 and info.file_size>200*max(1,info.compress_size)):raise ValueError("expanded archive limit")
             target=root/name
             target.parent.mkdir(parents=True,exist_ok=True)
-            with archive.open(info) as a,target.open("xb") as b:shutil.copyfileobj(a,b,1024**2)
+            actual=0
+            with archive.open(info) as a,target.open("xb") as b:
+                while True:
+                    block=a.read(1024**2)
+                    if not block:break
+                    actual+=len(block)
+                    if actual>info.file_size:raise ValueError('archive length mismatch')
+                    b.write(block)
+            if actual!=info.file_size:raise ValueError('archive length mismatch')
         model=root/entry
         if not model.is_file():raise ValueError("model missing")
         if model.suffix.lower()==".obj":obj_refs(root,model)

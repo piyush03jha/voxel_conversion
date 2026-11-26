@@ -104,7 +104,7 @@ export async function runConverter(config: WorkerConfig, dir: string, input: str
   }
   await run(config, dir, [config.blender, '--background', '--factory-startup', '--disable-autoexec',
     '--threads', String(config.threads), '--python-exit-code', '1', '--python', join(config.scriptsDir, 'blender-convert.py'),
-    '--', '--input', input, '--output', output, '--ext', ext], signal, config.blenderAddressMb)
+    '--', '--input', input, '--output', output, '--ext', ext,...(bundled?['--package-root',join(dir,'assets')]:[])], signal, config.blenderAddressMb)
   return output
 }
 
@@ -197,7 +197,7 @@ export async function convertJob(config: WorkerConfig, dir: string, input: strin
   const candidate = join(dir, 'optimized.' + target.toLowerCase())
   const args = [config.blender, '--background', '--factory-startup', '--disable-autoexec',
     '--threads', String(config.threads), '--python-exit-code', '1', '--python', join(config.scriptsDir, 'blender-convert.py'),
-    '--', '--input', input, '--output', output, '--ext', ext, '--target', target, '--compression', level]
+    '--', '--input', input, '--output', output, '--ext', ext, '--target', target, '--compression', level,...(bundled?['--package-root',join(dir,'assets')]:[])]
   // Publish baseline before optimizing. Candidate generation happens in same scene, not a second import.
   if (level !== 'None') args.push('--candidate', candidate)
   await run(config, dir, args, signal, config.blenderAddressMb)
@@ -225,7 +225,7 @@ export async function createPreview(config: WorkerConfig, dir: string, input: st
   else if(!bundled) await run(config,dir,[config.python,'-I',join(config.scriptsDir,'validate-input.py'),input,ext],deadline,config.memoryMb)
   if(source==='PDF')await run(boundedConfig,dir,['pdftocairo','-f','1','-l','1','-singlefile','-scale-to','1200','-png',input,join(dir,'preview')],deadline,config.memoryMb)
   else if(source==='SVG')await run(boundedConfig,dir,['rsvg-convert','-w','1200','-h','1200','--keep-aspect-ratio','-o',output,input],deadline,config.memoryMb)
-  else await run(boundedConfig,dir,[config.blender,'--background','--factory-startup','--disable-autoexec','--threads',String(config.threads),'--python-exit-code','1','--python',join(config.scriptsDir,'blender-convert.py'),'--','--input',input,'--output',output,'--ext',ext,'--preview'],deadline,config.blenderAddressMb)
+  else await run(boundedConfig,dir,[config.blender,'--background','--factory-startup','--disable-autoexec','--threads',String(config.threads),'--python-exit-code','1','--python',join(config.scriptsDir,'blender-convert.py'),'--','--input',input,'--output',output,'--ext',ext,'--preview',...(bundled?['--package-root',join(dir,'assets')]:[])],deadline,config.blenderAddressMb)
   let bytes:number
   if(kind==='GLB')bytes=(await readGlbInfo(output,PREVIEW_MAX_BYTES)).bytes
   else{
@@ -260,7 +260,7 @@ export async function exportPackage(config:WorkerConfig,dir:string,input:string,
   const ext='.'+source.toLowerCase()
   if(source==='STL')await run(config,dir,[config.python,'-I',join(config.scriptsDir,'validate-stl.py'),input],signal,config.memoryMb)
   else if(!bundled)await run(config,dir,[config.python,'-I',join(config.scriptsDir,'validate-input.py'),input,ext],signal,config.memoryMb)
-  await run(config,dir,[config.blender,'--background','--factory-startup','--disable-autoexec','--threads',String(config.threads),'--python-exit-code','1','--python',join(config.scriptsDir,'blender-convert.py'),'--','--input',input,'--output',model,'--ext',ext,'--target',target,'--package-output'],signal,config.blenderAddressMb)
+  await run(config,dir,[config.blender,'--background','--factory-startup','--disable-autoexec','--threads',String(config.threads),'--python-exit-code','1','--python',join(config.scriptsDir,'blender-convert.py'),'--','--input',input,'--output',model,'--ext',ext,'--target',target,'--package-output',...(bundled?['--package-root',join(dir,'assets')]:[])],signal,config.blenderAddressMb)
   await verifyOther(config,dir,model,target,signal)
   await run(config,dir,[config.python,'-I',join(config.scriptsDir,'package-output.py'),'pack',root,output,'model.'+target.toLowerCase(),String(config.maxOutputBytes)],signal,config.memoryMb)
   const bytes=(await stat(output)).size

@@ -59,3 +59,11 @@ test('batch dependency bundle contract',()=>{
   assert.throws(()=>checkJob(id,{...bundled,inputKey:'temporary/'+id+'/input.obj'},1000))
   assert.throws(()=>checkJob(id,{...good,compression:'High'},1000))
 })
+
+test('package output key follows package operation',()=>{
+  const bundle={...good,inputFormat:'OBJ' as const,inputKey:'temporary/'+id+'/input.zip',bundleEntry:'folder/model.obj'}
+  assert.doesNotThrow(()=>checkJob(id,{...bundle,purpose:'preview'},1000))
+  const compressed={...bundle,outputFormat:'OBJ' as const,compression:'High' as const,packageOutput:true,outputKey:'temporary/'+id+'/output.zip'}
+  assert.doesNotThrow(()=>checkJob(id,compressed,1000))
+  assert.throws(()=>checkJob(id,{...compressed,outputKey:good.outputKey},1000))
+})

@@ -15,7 +15,7 @@ import type {Model} from './discover'
 import {BATCH_MAX_ENTRIES,supportsPackage,supportsPackageExport} from '../../../../../packages/shared/src/batch'
 
 type Pending={session:Session;uploaded:boolean;target:ModelFormat}
-type Row={id:number;include:boolean;previewFile?:File;sourceSession?:Session;previewPending?:Session;packageFile?:File;model:Model;target:ModelFormat;state:'ready'|'working'|'done'|'failed'|'paused'|'skipped';stage:string;progress:number|null;result?:Result;pending?:Pending;error?:string}
+type Row={id:number;include:boolean;previewFile?:File;sourceSession?:Session;previewPending?:Session;previewUploaded?:boolean;packageFile?:File;model:Model;target:ModelFormat;state:'ready'|'working'|'done'|'failed'|'paused'|'skipped';stage:string;progress:number|null;result?:Result;pending?:Pending;error?:string}
 function size(bytes:number){return bytes>=1024**3?(bytes/1024**3).toFixed(2)+' GB':bytes>=1024**2?(bytes/1024**2).toFixed(1)+' MB':Math.max(1,Math.round(bytes/1024))+' KB'}
 function trigger(url:string,name:string,local=false){const a=document.createElement('a');a.href=url;a.download=name;a.rel='noreferrer';document.body.append(a);a.click();a.remove();if(local)setTimeout(()=>URL.revokeObjectURL(url),60000)}
 function fileName(file:File){return file.name.replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').slice(0,180)}
@@ -37,7 +37,7 @@ async function dropped(event:DragEvent):Promise<Asset[]>{
   return out
 }
 
-export default function BatchWorkspace({compress}:{compress:boolean}){
+export default function BatchWorkspace({compress,singlePackage=false}:{compress:boolean;singlePackage?:boolean}){
   const assetsRef=useRef<Asset[]>([])
   const [rows,setRows]=useState<Row[]>([]),rowsRef=useRef<Row[]>([])
   const [common,setCommon]=useState<ModelFormat>('GLB'),[level,setLevel]=useState<CompressionLevel>('Medium')
@@ -73,10 +73,10 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
       setMessage('Detecting models and related assets…')
       const models=await discover(assets,controller.signal)
       if(!models.length)throw new Error('No supported models found. Add STL, OBJ, FBX, GLB, glTF, 3MF, PLY, USD variants, ABC, BVH, SVG or PDF.')
-      const next=models.map((model,id):Row=>({id,include:true,model,target:compress?model.format:defaultTarget(model,common),state:'ready',stage:'Ready',progress:null}))
+      const next=models.map((model,id):Row=>({id,include:!singlePackage||models.length===1,model,target:compress?model.format:defaultTarget(model,common),state:'ready',stage:'Ready',progress:null}))
       await scratch.current.close();scratch.current=fresh
       await resultScratch.current.close();resultScratch.current=new Scratch();cachedResults.current.clear()
-      assetsRef.current=assets;batch.current=null;replace(next);setSelected(0);setMessage(models.length+' models found · '+(assets.length-models.length)+' other asset files detected')
+      assetsRef.current=assets;batch.current=null;replace(next);setSelected(0);setMessage(models.length===1?'One main model detected · '+models[0].dependencies.length+' supporting assets':models.length+' possible main models found. '+(singlePackage?'Choose the main model below.':'Select independent models to process.'))
     }catch(e){await fresh.close();if(!controller.signal.aborted)setError(e instanceof Error?e.message:'File scan failed')}
     finally{if(active.current===controller)active.current=null;if(alive.current)setScanning(false)}
   }
@@ -120,6 +120,7 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
     }
     if(!row.pending&&!allowServer){patch(row.id,{state:'skipped',stage:'Skipped',error:'Server processing is disabled for this batch'});return true}
     let p=row.pending
+    let attemptedReuse=false
     try{
       if(!p){
         if(!batch.current||Date.now()>=batch.current.expiresAt)batch.current=await api.createBatch(operation,signal)
@@ -130,6 +131,7 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
           upload=new File([blob],'dependencies.zip',{type:'application/zip'});patch(row.id,{packageFile:upload})
         }
         const reuse=row.sourceSession&&Date.now()+120000<row.sourceSession.expiresAt?row.sourceSession:undefined
+        attemptedReuse=!!reuse
         const session=await api.createBatchUpload(batch.current,upload,source.name,target,compression,signal,model.dependencies.length?model.asset.path:undefined,packaged,'conversion',reuse)
         p={session,target,uploaded:session.reused===true}
         patch(row.id,{pending:p,stage:'Uploading',progress:0})
@@ -153,7 +155,7 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
         patch(row.id,{pending:p,state:'paused',stage:'Tracking paused',error:detail,progress:null})
         return false
       }
-      patch(row.id,{state:'failed',stage:'Failed',error:detail,progress:null});return true
+      patch(row.id,{state:'failed',stage:'Failed',error:attemptedReuse?detail+' · Retry to upload the source again.':detail,progress:null,...(attemptedReuse?{sourceSession:undefined}:{})});return true
     }
   }
   async function run(only?:number){
@@ -175,25 +177,25 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
     if(active.current||!serverReady||rowsRef.current.some(r=>r.pending||r.previewPending&&r.id!==row.id))return
     const controller=new AbortController();active.current=controller;setWorking(true);setError('')
     const signal=controller.signal
-    let session=row.previewPending,uploaded=!!session
+    let session=row.previewPending,uploaded=row.previewUploaded===true
     try{
       if(!session){
         if(!batch.current||Date.now()>=batch.current.expiresAt)batch.current=await api.createBatch(operation,signal)
         let file=row.packageFile
         if(!file){file=new File([await zipFiles([row.model.asset,...row.model.dependencies],signal,setMessage)],'dependencies.zip',{type:'application/zip'});patch(row.id,{packageFile:file})}
         session=await api.createBatchUpload(batch.current,file,row.model.asset.file.name,'GLB','None',signal,row.model.asset.path,false,'preview',row.sourceSession&&Date.now()+120000<row.sourceSession.expiresAt?row.sourceSession:undefined)
-        patch(row.id,{previewPending:session})
+        patch(row.id,{previewPending:session,previewUploaded:session.reused===true})
         if(!session.reused)await api.upload(session,file,signal,p=>setMessage('Uploading package for preview · '+p+'%'))
-        uploaded=true
+        uploaded=true;patch(row.id,{previewUploaded:true})
       }
       while(Date.now()<session.expiresAt){
         signal.throwIfAborted()
         const job=await api.status(session,signal)
-        if(job.status==='awaiting-upload')await api.submit(session,signal)
+        if(job.status==='awaiting-upload'){await api.submit(session,signal);uploaded=true;patch(row.id,{previewUploaded:true})}
         else if(job.status==='completed'){
           if(!job.outputBytes||job.previewKind!=='GLB')throw new Error('Invalid preview result')
           const blob=await api.fetchPreview(session,job.outputBytes,signal)
-          patch(row.id,{previewFile:new File([blob],'package-preview.glb'),sourceSession:session,previewPending:undefined})
+          patch(row.id,{previewFile:new File([blob],'package-preview.glb'),sourceSession:session,previewPending:undefined,previewUploaded:undefined})
           setMessage('Package preview ready. Conversion can reuse the uploaded source.');return
         }else if(['failed','expired','cancelled'].includes(job.status)){patch(row.id,{previewPending:undefined});throw new Error(job.error??'Package preview '+job.status)}
         setMessage(job.status==='active'?'Generating package preview…':'Package preview waiting for worker…')
@@ -204,6 +206,13 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
       if(session&&!uploaded){try{await api.cancel(session);patch(row.id,{previewPending:undefined})}catch{/* keep token for reconciliation */}}
       setError(e instanceof Error?e.message:'Package preview unavailable')
     }finally{if(active.current===controller)active.current=null;if(alive.current)setWorking(false)}
+  }
+  function choosePrimary(id:number){
+    if(active.current||pending||completed>0)return
+    const root=rowsRef.current.find(r=>r.id===id)
+    if(!root)return
+    const model=root.model.manual?attachFolder(root.model,assetsRef.current):root.model
+    replace(rowsRef.current.map(r=>r.id===id?{...r,include:true,model,packageFile:undefined,previewFile:undefined,sourceSession:undefined}:{...r,include:false}));setSelected(id)
   }
   function attach(row:Row){
     if(active.current||pending||row.state==='done')return
@@ -251,36 +260,38 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
     await resultScratch.current.close();resultScratch.current=new Scratch();cachedResults.current.clear()
   }
   const chosen=rows.find(row=>row.id===selected),completed=rows.filter(r=>r.state==='done').length
+  const included=rows.filter(r=>r.include),includedDone=included.filter(r=>r.state==='done').length
   const changeCommon=(value:ModelFormat)=>{setCommon(value);replace(rowsRef.current.map(row=>row.state==='done'||row.pending?row:{...row,target:value,state:'ready',stage:'Ready',error:undefined}))}
   return <main className="app-shell batch-shell">
     <header className="topbar"><a className="brand" href="/">formshift</a><nav className="tool-nav" aria-label="Model tools"><a href="/" aria-disabled={locked||pending} onClick={e=>{if(locked||pending)e.preventDefault()}}>Convert</a><a href="/compress" aria-disabled={locked||pending} onClick={e=>{if(locked||pending)e.preventDefault()}}>Compress</a><a href="/batch" aria-current={!compress?'page':undefined} aria-disabled={locked||pending} onClick={e=>{if(locked||pending)e.preventDefault()}}>Batch convert</a><a href="/compress/batch" aria-current={compress?'page':undefined} aria-disabled={locked||pending} onClick={e=>{if(locked||pending)e.preventDefault()}}>Batch compress</a></nav><span className="service-indicator"><i/>{serverReady?'Server ready':'Browser mode'}</span></header>
-    <section className="intro batch-intro"><div className="intro-copy"><div className="eyebrow">MULTIPLE FILES · PRIVATE PROCESSING</div><h1>{compress?'Compress':'Convert'} <span>your models together.</span></h1><p>{compress?'Reduce supported models individually, without changing file formats.':'Choose a common output or set the format for each model. Conversion never applies optional compression.'}</p></div></section>
+    <section className="intro batch-intro"><div className="intro-copy"><div className="eyebrow">MULTIPLE FILES · PRIVATE PROCESSING</div><h1>{compress?'Compress':'Convert'} <span>{singlePackage?'your complete model.':'your models together.'}</span></h1><p>{compress?'Reduce supported models individually, without changing file formats.':'Choose a common output or set the format for each model. Conversion never applies optional compression.'}</p></div></section>
     <section className="batch-upload upload-card" onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();if(!locked&&!pending){const files=dropped(e);void scan(()=>files)}}}>
       <input ref={filesInput} type="file" multiple className="visually-hidden" disabled={locked||pending} onChange={pick} aria-label="Select multiple files or ZIP"/>
       <input ref={el=>{folderInput.current=el;if(el)el.setAttribute('webkitdirectory','')}} type="file" multiple className="visually-hidden" disabled={locked||pending} onChange={pick} aria-label="Select folder"/>
-      <div className="upload-copy"><strong>Drop models, a folder or ZIP archives here</strong><span>Up to 100 models per batch. No fixed individual upload byte cap; ZIP extraction safety limits apply.</span></div>
+      <div className="upload-copy"><strong>{singlePackage?'Drop one model folder or ZIP package here':'Drop models, a folder or ZIP archives here'}</strong><span>Up to 100 models per batch. No fixed individual upload byte cap; ZIP extraction safety limits apply.</span></div>
       <div className="batch-buttons"><button className="job-action" type="button" disabled={locked||pending} onClick={()=>filesInput.current?.click()}>Select files / ZIP</button><button className="job-action" type="button" disabled={locked||pending} onClick={()=>folderInput.current?.click()}>Select folder</button>{rows.length>0&&<button className="job-action" type="button" disabled={locked||pending} onClick={()=>void clear()}>Clear batch</button>}</div>
     </section>
     {message&&<p className="batch-message" role="status">{message}</p>}{error&&<p className="error-message" role="alert">{error}</p>}
     {scanning&&<button className="job-action" type="button" onClick={()=>active.current?.abort()}>Cancel scan</button>}
     {!!rows.length&&<>
+      {singlePackage&&<section className="batch-options"><label>Main model<select value={included[0]?.id??''} disabled={locked||pending||completed>0} onChange={e=>choosePrimary(Number(e.target.value))}><option value="" disabled>Select the primary model</option>{rows.map(r=><option key={r.id} value={r.id}>{r.model.asset.path}</option>)}</select></label><p className="format-footnote">Referenced assets follow the main model automatically. Other independent models are excluded.</p></section>}
       <section className="batch-options" aria-label="Batch settings">
         {compress?<label>Compression level<select value={level} disabled={locked||pending||completed>0} onChange={e=>setLevel(e.target.value as CompressionLevel)}>{['Low','Medium','High'].map(v=><option key={v}>{v}</option>)}</select></label>:<label>Common output<select value={common} disabled={locked||pending} onChange={e=>changeCommon(e.target.value as ModelFormat)}>{ACCEPTED_FORMATS.filter(f=>rows.some(row=>row.model.format!==f&&isConversionSupported(row.model.format,f))).map(f=><option key={f}>{f}</option>)}</select></label>}
         <label className="batch-consent"><input type="checkbox" checked={allowServer} disabled={locked||pending} onChange={e=>setAllowServer(e.target.checked)}/> Allow server processing for models that cannot run locally</label>
-        <div className="batch-actions"><button className="convert-button" type="button" disabled={locked||completed===rows.length} onClick={()=>void run()}>{pending?'Resume batch':compress?'Compress batch':'Convert batch'}</button>{working&&<button className="job-action" type="button" disabled={stopRequested} onClick={()=>{stop.current=true;setStopRequested(true)}}>{stopRequested?'Stopping after current…':'Stop after current'}</button>}<button className="job-action download-action" type="button" disabled={locked||!completed} onClick={()=>void downloadAll()}>{packing?'Preparing ZIP…':'Download completed as ZIP ('+completed+')'}</button>{packing&&<button className="job-action" type="button" onClick={()=>active.current?.abort()}>Cancel ZIP preparation</button>}</div>
+        <div className="batch-actions"><button className="convert-button" type="button" disabled={locked||!included.length||includedDone===included.length} onClick={()=>void run()}>{pending?'Resume job':singlePackage?(compress?'Compress package':'Convert package'):(compress?'Compress batch':'Convert batch')}</button>{working&&<button className="job-action" type="button" disabled={stopRequested} onClick={()=>{stop.current=true;setStopRequested(true)}}>{stopRequested?'Stopping after current…':'Stop after current'}</button>}<button className="job-action download-action" type="button" disabled={locked||!completed} onClick={()=>void downloadAll()}>{packing?'Preparing ZIP…':'Download completed as ZIP ('+completed+')'}</button>{packing&&<button className="job-action" type="button" onClick={()=>active.current?.abort()}>Cancel ZIP preparation</button>}</div>
       </section>
       <section className="batch-grid">
-        <div className="batch-list"><div className="section-heading"><h2>{completed} of {rows.length} completed</h2></div>
+        <div className="batch-list"><div className="section-heading"><h2>{includedDone} of {included.length} selected models completed</h2></div>
           {rows.map(row=><article key={row.id} className={'batch-row '+(selected===row.id?'batch-selected':'')}>
             <button className="batch-file" type="button" onClick={()=>setSelected(row.id)}><strong title={row.model.asset.path}>{row.model.asset.path}</strong><small>{size(row.model.asset.file.size)} · {row.model.format}{row.model.dependencies.length?' · '+row.model.dependencies.length+' dependencies':''}</small></button>
             {compress?<span>{row.model.format} → {row.model.format}</span>:<label className="batch-target">To <select value={row.target} disabled={locked||pending||row.state==='done'} onChange={e=>patch(row.id,{target:e.target.value as ModelFormat,state:'ready',stage:'Ready',error:undefined})}>
               {!isConversionSupported(row.model.format,row.target)||row.target===row.model.format?<option value={row.target}>{row.target} (incompatible)</option>:null}
               <optgroup label="Recommended">{getOutputGroups(row.model.format).recommended.map(f=><option key={f}>{f}</option>)}</optgroup><optgroup label="Other compatible">{getOutputGroups(row.model.format).other.map(f=><option key={f}>{f}</option>)}</optgroup></select></label>}
-            <div className="batch-row-status"><label><input type="checkbox" checked={row.include} disabled={locked||pending||row.state==='done'} onChange={e=>patch(row.id,{include:e.target.checked})}/> Include model</label>{row.model.warning&&<small>{row.model.warning}</small>}{supportsPackage(row.model.format)&&<button className="text-button" type="button" disabled={locked||pending||row.state==='done'} onClick={()=>attach(row)}>Attach supporting folder assets</button>}<strong>{row.stage}</strong>{row.progress!==null&&<progress className="job-progress" value={row.progress} max={100}/>}<small>{row.result?size(row.result.bytes)+' · '+((1-row.result.bytes/row.result.originalBytes)*100).toFixed(1)+'% reduction':row.error||reason(row)||getOutputWarning(row.target)||''}</small>{row.result?.warning&&<small>{row.result.warning}</small>}</div>
+            <div className="batch-row-status">{!singlePackage&&<label><input type="checkbox" checked={row.include} disabled={locked||pending||row.state==='done'} onChange={e=>patch(row.id,{include:e.target.checked})}/> Include model</label>}{row.model.warning&&<small>{row.model.warning}</small>}{row.model.dependencies.length>0&&<details className="dependency-list"><summary>{row.model.dependencies.length} supporting files · {size(row.model.dependencies.reduce((n,d)=>n+d.file.size,row.model.asset.file.size))} package</summary>{row.model.dependencies.map(d=><small key={d.path}>{d.path}</small>)}</details>}{supportsPackage(row.model.format)&&<button className="text-button" type="button" disabled={locked||pending||row.state==='done'} onClick={()=>attach(row)}>Attach supporting folder assets</button>}<strong>{row.stage}</strong>{row.progress!==null&&<progress className="job-progress" value={row.progress} max={100}/>}<small>{row.result?size(row.result.bytes)+' · '+((1-row.result.bytes/row.result.originalBytes)*100).toFixed(1)+'% reduction':row.error||reason(row)||(compress&&row.model.dependencies.length?'Lossless package compression; model and asset bytes unchanged.':!compress&&supportsPackageExport(row.target)?'ZIP export includes supported material and texture files.':getOutputWarning(row.target))||''}</small>{row.result?.warning&&<small>{row.result.warning}</small>}</div>
             <div className="batch-row-actions">{row.result?<button className="job-action download-action" type="button" onClick={()=>void downloadOne(row)}>Download</button>:<button className="job-action" type="button" disabled={locked||!row.include||!!reason(row)&&!row.pending||pending&&!row.pending} onClick={()=>void run(row.id)}>{row.pending?'Resume':row.state==='failed'?'Retry':'Process'}</button>}</div>
           </article>)}
         </div>
-        <aside className="batch-preview"><div className="preview-heading"><h2>Model preview</h2></div><p className="format-footnote">{chosen?.model.dependencies.length?'Package preview includes the related files in its import. Preview shows static geometry only.':''}</p>{chosen&&chosen.model.dependencies.length>0&&!chosen.previewFile&&<button className="job-action" type="button" disabled={locked||!serverReady||!!chosen.model.error||rows.some(r=>r.pending||r.previewPending&&r.id!==chosen.id)} onClick={()=>void previewPackage(chosen)}>{chosen.previewPending?'Resume package preview':'Generate package preview'}</button>}<div className="preview-window"><ModelPreview key={String(chosen?.id??-1)+':'+(chosen?.previewFile?'package':'source')} file={chosen?.model.dependencies.length?chosen.previewFile??null:chosen?.model.asset.file??null} result={chosen?.result??null} busy={working||packing} serverReady={serverReady}/></div></aside>
+        <aside className="batch-preview"><div className="preview-heading"><h2>Model preview</h2></div><p className="format-footnote">{chosen?.model.dependencies.length?'Package preview includes the related files in its import. Preview shows static geometry only.':''}</p>{chosen&&chosen.include&&chosen.model.dependencies.length>0&&!chosen.previewFile&&<button className="job-action" type="button" disabled={locked||!serverReady||!!chosen.model.error||rows.some(r=>r.pending||r.previewPending&&r.id!==chosen.id)} onClick={()=>void previewPackage(chosen)}>{chosen.previewPending?'Resume package preview':'Generate package preview'}</button>}<div className="preview-window"><ModelPreview key={String(chosen?.id??-1)+':'+(chosen?.previewFile?'package':'source')} file={chosen?.model.dependencies.length?chosen.previewFile??null:chosen?.model.asset.file??null} result={chosen?.result??null} busy={working||packing} serverReady={serverReady}/></div></aside>
       </section>
       <p className="privacy-note">One server job per batch. Individual results are available as soon as they finish. Keep this tab open and finish downloads before clearing the batch; server files and download links expire. ZIP downloads use browser temporary disk where available.</p>
     </>}

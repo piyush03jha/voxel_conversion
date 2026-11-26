@@ -3,6 +3,7 @@ import argparse
 import os
 import subprocess
 import tempfile
+import pathlib
 
 import bpy
 
@@ -17,6 +18,7 @@ parser.add_argument("--output", required=True)
 parser.add_argument("--ext", required=True)
 parser.add_argument("--target", default="GLB")
 parser.add_argument("--package-output", action="store_true")
+parser.add_argument("--package-root")
 parser.add_argument("--compression", default="None")
 parser.add_argument("--candidate")
 parser.add_argument("--preview", action="store_true")
@@ -28,6 +30,26 @@ ext = args.ext.lower()
 input_path = args.input
 generated_svg = None
 
+
+def verify_usd_dependencies(model, root):
+    # OpenUSD resolves binary and text layers using the actual resolver, in the
+    # sandbox. Reject unresolved or out-of-package assets.
+    from pxr import Sdf, UsdUtils
+    root=pathlib.Path(root).resolve()
+    layers, assets, missing=UsdUtils.ComputeAllDependencies(Sdf.AssetPath(model))
+    if missing or not layers:raise RuntimeError("Missing USD dependencies")
+    for value in [layer.realPath for layer in layers]+list(assets):
+        path=pathlib.Path(str(value)).resolve()
+        if not path.is_relative_to(root) or not path.is_file():raise RuntimeError("USD dependency escapes package")
+
+def check_package_images(root):
+    root=pathlib.Path(root).resolve()
+    for image in bpy.data.images:
+        if image.source not in ('FILE','TILED','SEQUENCE','MOVIE') or image.packed_file:continue
+        if image.source!='FILE':raise RuntimeError("Tiled or sequence textures require explicit relinking")
+        if not image.filepath:continue
+        path=pathlib.Path(bpy.path.abspath(image.filepath)).resolve()
+        if not path.is_relative_to(root) or not path.is_file():raise RuntimeError("Missing or external image dependency")
 
 def supported_kwargs(operator, **kwargs):
     """Keep only the keyword arguments the running Blender build defines.
@@ -392,7 +414,7 @@ try:
         if getattr(result, "status", None) != "FINISHED":
             raise RuntimeError("Blender 3MF fallback import failed: " + str(getattr(result, "message", result)))
     elif ext == ".fbx":
-        bpy.ops.import_scene.fbx(filepath=input_path)
+        bpy.ops.import_scene.fbx(filepath=input_path, use_image_search=True)
     elif ext == ".obj":
         bpy.ops.wm.obj_import(filepath=input_path)
     elif ext == ".ply":
@@ -419,6 +441,8 @@ try:
         except Exception as exc:
             print("WARNING: USD up-axis metadata unavailable:", str(exc))
 
+        if args.package_root:
+            verify_usd_dependencies(input_path,args.package_root)
         bpy.ops.wm.usd_import(filepath=input_path)
     elif ext == ".abc":
         # Run synchronously: in a headless run a background import job can
@@ -444,6 +468,9 @@ try:
             ) from exc
     else:
         raise RuntimeError("Unsupported conversion extension: " + ext)
+
+    if args.package_root:
+        check_package_images(args.package_root)
 
     # glTF cannot represent Blender Grease Pencil directly. Convert imported
     # Grease Pencil/curve objects into mesh geometry before exporting.
@@ -514,6 +541,8 @@ try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from export_handlers import export_scene, compress_scene
         export_scene(args.target, args.output, "None", args.package_output)
+        if args.package_output and args.target in ('USD','USDA','USDC'):
+            verify_usd_dependencies(args.output,os.path.dirname(args.output))
         if args.candidate and args.compression != "None":
             try:
                 if args.target == "3MF" or compress_scene(args.compression):

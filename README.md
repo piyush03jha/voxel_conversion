@@ -55,3 +55,5 @@ See [workspace update](docs/workspace-update.md) for the separate /compress tool
 Large-upload update: [ADVFX-based multipart uploads and resource sizing](docs/large-uploads.md). No fixed application input size cap; provider, shared storage budget, disk and format constraints still apply.
 
 Batch tools: [/batch](/batch) and [/compress/batch](/compress/batch). See [batch processing](docs/batch-processing.md) for capabilities, resource limits and local tests. Conversion and compression are separate API operations; no combined format change and optional compression.
+
+Single-model folders and ZIP packages: [/package](/package), [/compress/package](/compress/package). See [model packages](docs/model-packages.md).

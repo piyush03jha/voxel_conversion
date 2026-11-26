@@ -179,7 +179,7 @@ function SingleWorkspace() {
             {file && <button className="remove-file" type="button" disabled={job.busy || job.canResume || downloading} onClick={() => { setFile(null); setFileError(''); reset() }} aria-label="Remove selected file">×</button>}
           </div>
           {fileError && <p className="error-message" role="alert">{fileError}</p>}
-          <p className="format-footnote" style={{marginTop:12,marginBottom:16}}>Have multiple models, textures, a folder or ZIP? <a className="tool-link" href={compressPage?'/compress/batch':'/batch'} aria-disabled={locked} onClick={event=>{if(locked)event.preventDefault()}}>Open batch {compressPage?'compression':'conversion'}</a>.</p>
+          <p className="format-footnote" style={{marginTop:12,marginBottom:16}}>Have a model folder with textures or materials? <a className="tool-link" href={compressPage?'/compress/package':'/package'} aria-disabled={locked} onClick={event=>{if(locked)event.preventDefault()}}>Open model package</a>. For independent models, use <a className="tool-link" href={compressPage?'/compress/batch':'/batch'} aria-disabled={locked} onClick={event=>{if(locked)event.preventDefault()}}>batch {compressPage?'compression':'conversion'}</a>.</p>
 
           <div className="preview-heading">
             <div>
@@ -288,6 +288,6 @@ function SingleWorkspace() {
 
 export default function App(){
   const path=window.location.pathname.replace(/\/$/,'')
-  if(path==='/batch'||path==='/compress/batch')return <BatchWorkspace compress={path==='/compress/batch'}/>
+  if(['/batch','/compress/batch','/package','/compress/package'].includes(path))return <BatchWorkspace compress={path.startsWith('/compress')} singlePackage={path.endsWith('/package')}/>
   return <SingleWorkspace/>
 }

@@ -198,7 +198,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const multipart = !internalCopy && request.originalBytes > SINGLE_PUT_THRESHOLD
     const uploadSeconds = multipart ? this.config.multipartSeconds : this.config.uploadSeconds
     const session: Session = {
-      ...request, id, hash: tokenHash(token), ...(batchId?{batchId,downloadName:((body as {filename:string}).filename.replace(/\.[^.]+$/,'').replace(/[^\p{L}\p{N} ._-]/gu,'_').slice(0,160)||'model')+'.'+(request.purpose==='preview'?'glb':request.packageOutput?'zip':request.outputFormat.toLowerCase())}:{}),
+      ...request, id, hash: tokenHash(token), ...(batchId?{batchId,downloadName:((body as {filename:string}).filename.replace(/\.[^.]+$/,'').replace(/[^\p{L}\p{N} ._-]/gu,'_').slice(0,160)||'model')+'.'+(request.purpose==='preview'?previewKind(request.inputFormat).toLowerCase():request.packageOutput?request.outputFormat.toLowerCase()+'.zip':request.outputFormat.toLowerCase())}:{}),
       inputKey: bundleInputKey(id,request.inputFormat,request.bundleEntry),
       outputKey: jobOutputKey(id, request.inputFormat, request.outputFormat, request.purpose,request.packageOutput),
       uploadUntil: now + uploadSeconds * 1000,

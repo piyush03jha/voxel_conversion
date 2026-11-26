@@ -31,12 +31,13 @@ export function textureReference(raw:string){
   }
   return text.trim()
 }
-const usdLayer=/\.(usd|usda|usdc|usdz)$/i
+const usdLayer=/\.(usd|usda|usdc)$/i
 function parent(path:string){return path.split('/').slice(0,-1).join('/')}
 function inFolder(path:string,folder:string){return !folder||path.startsWith(folder+'/')}
 export function attachFolder(root:Model,assets:Asset[]):Model{
   if(!supportsPackage(root.format))throw new Error('This format does not use external model packages')
-  const folder=parent(root.asset.path)
+  // Keep sibling directories (models/, textures/) inside the selected top-level folder.
+  const folder=root.asset.path.includes('/')?root.asset.path.split('/')[0]:parent(root.asset.path)
   const known=new Map(root.dependencies.map(a=>[a.path,a]))
   for(const a of assets)if(a.path!==root.asset.path&&inFolder(a.path,folder)&&(images.test(a.path)||/\.(mtl|bin)$/i.test(a.path)||(['USD','USDA','USDC'].includes(root.format)&&usdLayer.test(a.path))))known.set(a.path,a)
   return {...root,dependencies:[...known.values()],manual:true,warning:'Folder assets included by selection; opaque importer references may still require relinking.'}
@@ -84,7 +85,7 @@ export async function discover(assets:Asset[],signal:AbortSignal){
         }
       }else if(format==='GLTF'||format==='GLB'){
         const doc=await gltfDocument(asset,format),stack=[doc]
-        if(doc===null)warning='Large glTF manifest: external dependencies require manual folder selection.'
+        if(doc===null){warning='Large glTF manifest: external dependencies require manual folder selection.';manual=true}
         while(stack.length){const item=stack.pop();if(item&&typeof item==='object')for(const [key,value] of Object.entries(item)){if(key==='uri'){if(typeof value!=='string')throw new Error('Invalid glTF URI');if(!value.startsWith('data:')){const file=find(asset.path,value,true);if(!images.test(file.path)&&!/\.bin$/i.test(file.path))throw new Error('Unsupported glTF dependency')}}else if(value&&typeof value==='object')stack.push(value)}}
       }else if(['USD','USDA','USDC'].includes(format)){
         const seen=new Set<string>(),visiting=new Set<string>()
@@ -96,7 +97,7 @@ export async function discover(assets:Asset[],signal:AbortSignal){
           if(!(await layer.file.slice(0,8).text()).startsWith('#usda')||layer.file.size>8*1024**2){warning='Binary or large USD layer: select the main model and attach its folder assets.';manual=true;visiting.delete(layer.path);return}
           const text=await layer.file.text()
           for(const match of text.matchAll(/@([^@\r\n]+)@/g)){
-            const dep=find(layer.path,match[1]);if(usdLayer.test(dep.path)){referencedLayers.add(dep.path);if(!/\.usdz$/i.test(dep.path))await scanLayer(dep)}else if(!images.test(dep.path))throw new Error('Unsupported USD asset type: '+dep.path)
+            const dep=find(layer.path,match[1]);if(usdLayer.test(dep.path)){referencedLayers.add(dep.path);await scanLayer(dep)}else if(!images.test(dep.path))throw new Error('Unsupported USD asset type: '+dep.path)
           }
           visiting.delete(layer.path)
         }
@@ -109,5 +110,10 @@ export async function discover(assets:Asset[],signal:AbortSignal){
   }
   const roots=models.filter(m=>!referencedLayers.has(m.asset.path))
   if(!roots.length&&models.length)return models
-  return roots.map(m=>m.manual&&roots.length===1?attachFolder(m,assets):m)
+  return roots.map(m=>{
+    if(!m.manual)return m
+    const top=m.asset.path.includes('/')?m.asset.path.split('/')[0]:''
+    const siblings=roots.filter(r=>inFolder(r.asset.path,top))
+    return siblings.length===1?attachFolder(m,assets):m
+  })
 }

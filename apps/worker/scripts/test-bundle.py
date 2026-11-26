@@ -11,6 +11,9 @@ class BundleTests(unittest.TestCase):
             ("external texture","a.obj",{"a.obj":"mtllib a.mtl","a.mtl":"map_Kd ../../secret.png"},False),
             ("other model","a.obj",{"a.obj":"v 0 0 0","b.obj":"v 0 0 0"},False),
             ("duplicate","a.obj",{"a.obj":"v 0 0 0","a.png":"x","A.png":"y"},False),
+            ("MTL options","a.obj",{"a.obj":"mtllib a.mtl","a.mtl":"map_Kd -s 1 1 1 -bm 0.5 texture with spaces.png","texture with spaces.png":"png"},True),
+            ("USD root","root.usda",{"root.usda":"#usda 1.0\n( subLayers = [@layers/part.usda@] )","layers/part.usda":"#usda 1.0\nasset image = @../texture.png@","texture.png":"png"},True),
+            ("USD missing","root.usda",{"root.usda":"#usda 1.0\n( subLayers = [@missing.usda@] )"},False),
             ("ratio","a.obj",{"a.obj":"v 0 0 0","x.bin":b"0"*(9*1024*1024)},False),
         ]
         for label,entry,files,ok in cases:
