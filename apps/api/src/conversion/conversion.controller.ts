@@ -5,6 +5,14 @@ import { QueueService } from './queue.service'
 export class ConversionController {
   constructor(private readonly jobs: QueueService) {}
 
+  @Post('batches')
+  @Header('Cache-Control','no-store')
+  createBatch(@Body() body:unknown){return this.jobs.createBatch(body)}
+
+  @Post('batches/:batchId/uploads')
+  @Header('Cache-Control','no-store')
+  batchUpload(@Param('batchId') id:string,@Body() body:unknown,@Headers('authorization') auth?:string){return this.jobs.createBatchUpload(id,body,auth)}
+
   @Post('uploads')
   @Header('Cache-Control', 'no-store')
   create(@Body() body: unknown) { return this.jobs.create(body) }

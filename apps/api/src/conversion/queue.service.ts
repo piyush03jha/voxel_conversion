@@ -3,6 +3,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import Redis from 'ioredis'
 import { Queue } from 'bullmq'
 import type { ConversionJobData, ConversionJobResult } from '../../../../packages/shared/src/jobs'
+import { bundleInputKey } from '../../../../packages/shared/src/batch'
 import { SINGLE_PUT_THRESHOLD, multipartPlan, partBytes, PART_URL_BATCH } from '../../../../packages/shared/src/upload'
 import { getCompressionLevels } from '../../../../packages/shared/src/compatibility'
 import { QUEUE_NAME, WORKER_HEARTBEATS, isWorkerRoute } from '../../../../packages/shared/src/jobs'
@@ -21,6 +22,7 @@ interface Session extends UploadRequest {
   uploadUntil: number
   expiresAt: number
   cancelled?: boolean
+  batchId?: string
   multipart?: { uploadId:string; partSize:number; partCount:number }
 }
 const prefix = 'formshift:{sessions}:'
@@ -28,9 +30,12 @@ const slots = prefix + 'slots'
 const due = prefix + 'due'
 const reservedBytes = prefix + 'reserved-input-bytes'
 const sessionKey = (id: string) => prefix + 'session:' + id
+const batchKey = (id:string) => prefix+'batch:'+id
+const batchActive = (id:string) => prefix+'batch-active:'+id
 const lockKey = (id: string) => prefix + 'lock:' + id
 // All admission keys share a Redis hash tag. Never store model bytes in Redis.
 const RESERVE = `
+if ARGV[7] == '1' and redis.call('EXISTS', KEYS[5]) == 1 then return -2 end
 if redis.call('SCARD', KEYS[1]) >= tonumber(ARGV[1]) then return 0 end
 if redis.call('EXISTS', KEYS[3]) == 1 then return 0 end
 local used = 0
@@ -40,6 +45,7 @@ redis.call('HSET', KEYS[4], ARGV[2], ARGV[5])
 redis.call('SET', KEYS[3], ARGV[3])
 redis.call('SADD', KEYS[1], ARGV[2])
 redis.call('ZADD', KEYS[2], ARGV[4], ARGV[2])
+if ARGV[7] == '1' then redis.call('SET', KEYS[5], ARGV[2], 'EX', 86400) end
 return 1
 `
 const RATE = `
@@ -128,9 +134,40 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     try { return await action() }
     finally { await redis.eval(RELEASE_LOCK, 1, lockKey(id), token).catch(() => undefined) }
   }
-  async create(body: unknown, internalCopy = false) {
+  async createBatch(body:unknown){
+    if(!this.config.acceptJobs||!this.storage.configured)throw new ServiceUnavailableException('Server jobs disabled')
+    const operation=(body as {operation?:unknown}|null)?.operation
+    if(operation!=='conversion'&&operation!=='compression')throw new BadRequestException('Invalid batch operation')
+    const {redis}=this.ready()
+    const count=Number(await redis.eval(RATE,1,prefix+'batch-rate'))
+    if(count>this.config.createsPerMinute)throw new HttpException('Batch creation rate limit reached',429)
+    const id=randomUUID(),token=randomBytes(32).toString('hex')
+    const expiresAt=Date.now()+this.config.retentionSeconds*1000
+    await redis.set(batchKey(id),JSON.stringify({hash:tokenHash(token),operation,expiresAt}),'EX',this.config.retentionSeconds)
+    return {id,token,expiresAt}
+  }
+  async createBatchUpload(id:string,body:unknown,authorization?:string){
+    const {redis,queue}=this.ready()
+    if(!/^[0-9a-f-]{36}$/.test(id))throw new NotFoundException('Batch not found')
+    const raw=await redis.get(batchKey(id)),token=authorization?.match(/^Bearer ([a-f0-9]{64})$/)?.[1]
+    if(!raw||!token)throw new NotFoundException('Batch not found')
+    const batch=JSON.parse(raw) as {hash:string;operation:'conversion'|'compression';expiresAt:number}
+    if(!timingSafeEqual(Buffer.from(batch.hash,'hex'),Buffer.from(tokenHash(token),'hex'))||Date.now()>=batch.expiresAt)throw new NotFoundException('Batch not found')
+    const request=validateUpload(body)
+    if(request.purpose==='preview'||(batch.operation==='conversion'&&(request.compression!=='None'||request.inputFormat===request.outputFormat))||(batch.operation==='compression'&&(request.inputFormat!==request.outputFormat||request.compression==='None'||request.bundleEntry)))throw new BadRequestException('Batch operation and settings do not match')
+    const active=await redis.get(batchActive(id))
+    if(active){
+      const s=await this.read(active),j=await queue.getJob(active)
+      const state=j?await j.getState():null
+      if(state==='active'||(j&&!['completed','failed'].includes(state??''))||(s&&!s.cancelled&&!j&&Date.now()<s.uploadUntil))throw new ConflictException('One server job per batch; wait for the current item')
+      await redis.eval(RELEASE_LOCK,1,batchActive(id),active)
+    }
+    return this.create(body,false,id)
+  }
+  async create(body: unknown, internalCopy = false,batchId?:string) {
     if (!this.config.acceptJobs || !this.storage.configured) throw new ServiceUnavailableException('Job submission is disabled')
     const request = validateUpload(body)
+    if(request.bundleEntry&&!batchId)throw new BadRequestException('Dependency bundles require a batch session')
     if (!isWorkerRoute(request.inputFormat, request.outputFormat) || request.color !== null) throw new BadRequestException('Unsupported conversion pair; custom color is paused')
     if (!this.config.queueTestMode && await this.workerCount() < 1) throw new ServiceUnavailableException('No conversion worker is available')
     const { redis } = this.ready()
@@ -142,14 +179,15 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const multipart = !internalCopy && request.originalBytes > SINGLE_PUT_THRESHOLD
     const uploadSeconds = multipart ? this.config.multipartSeconds : this.config.uploadSeconds
     const session: Session = {
-      ...request, id, hash: tokenHash(token),
-      inputKey: 'temporary/' + id + '/input.' + request.inputFormat.toLowerCase(),
+      ...request, id, hash: tokenHash(token), ...(batchId?{batchId}:{}),
+      inputKey: bundleInputKey(id,request.inputFormat,request.bundleEntry),
       outputKey: jobOutputKey(id, request.inputFormat, request.outputFormat, request.purpose),
       uploadUntil: now + uploadSeconds * 1000,
       expiresAt: now + this.config.retentionSeconds * 1000,
     }
     // Reserve before returning a signed URL, including uploads that never submit.
-    const ok = await redis.eval(RESERVE, 4, slots, due, sessionKey(id), reservedBytes, this.config.capacity, id, JSON.stringify(session), session.uploadUntil + 60000, request.originalBytes, this.config.storageBudgetBytes)
+    const ok = await redis.eval(RESERVE, 5, slots, due, sessionKey(id), reservedBytes, batchActive(batchId??id), this.config.capacity, id, JSON.stringify(session), session.uploadUntil + 60000, request.originalBytes, this.config.storageBudgetBytes,batchId?'1':'0')
+    if (Number(ok) === -2) throw new ConflictException('One server job per batch; wait for the current item')
     if (Number(ok) === -1) throw new HttpException('Temporary storage capacity reached; try again later', HttpStatus.TOO_MANY_REQUESTS)
     if (Number(ok) !== 1) throw new HttpException('Queue capacity reached', HttpStatus.TOO_MANY_REQUESTS)
     try {
@@ -211,7 +249,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       // Extend cleanup deadline before publishing; retry with the same job id is idempotent.
       await redis.zadd(due, s.expiresAt, id)
       try { await queue.add('convert', {
-        purpose: s.purpose ?? 'conversion', inputKey: s.inputKey, outputKey: s.outputKey, inputFormat: s.inputFormat, outputFormat: s.outputFormat,
+        purpose: s.purpose ?? 'conversion', ...(s.bundleEntry?{bundleEntry:s.bundleEntry}:{}), inputKey: s.inputKey, outputKey: s.outputKey, inputFormat: s.inputFormat, outputFormat: s.outputFormat,
         originalBytes: s.originalBytes, compression: s.compression, color: s.color,
         etag: object.ETag, expiresAt: s.expiresAt,
       }, { jobId: id, ...(s.purpose === 'preview' ? { priority: 10 } : {}) }) } catch (error) {

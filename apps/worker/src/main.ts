@@ -8,14 +8,14 @@ import { QUEUE_NAME, WORKER_HEARTBEATS } from '../../../packages/shared/src/jobs
 import type { ConversionJobData, ConversionJobResult } from '../../../packages/shared/src/jobs'
 import { workerConfig } from './config'
 import { checkJob } from './contract'
-import { convertJob, createPreview, probeSandbox } from './process'
+import { convertJob, createPreview, probeSandbox, unpackBundle } from './process'
 import { storageClient, checkStorage, downloadInput, uploadOutput } from './storage'
 
 async function main() {
   const config = workerConfig()
   if (process.platform !== 'linux') throw new Error('Use a Linux or Docker worker')
   await access(config.workRoot, constants.W_OK)
-  for (const script of ['validate-stl.py', 'validate-input.py', 'dense-mesh-to-glb.py', 'threemf-to-glb.py', 'blender-convert.py', 'export_handlers.py', 'embed-gltf.py', 'verify-output.py', 'preview_mesh.py', 'stream-stl-glb.py', 'repack-3mf.py']) await access(join(config.scriptsDir, script), constants.R_OK)
+  for (const script of ['validate-stl.py', 'validate-input.py', 'dense-mesh-to-glb.py', 'threemf-to-glb.py', 'blender-convert.py', 'export_handlers.py', 'embed-gltf.py', 'verify-output.py', 'preview_mesh.py', 'stream-stl-glb.py', 'repack-3mf.py', 'extract-bundle.py']) await access(join(config.scriptsDir, script), constants.R_OK)
   // Verify executable availability before announcing a worker.
   const { spawnSync } = await import('node:child_process')
   for (const executable of ['prlimit', config.python, config.blender, config.optimizer, 'pdftocairo', 'rsvg-convert', ...(config.sandbox === 'bwrap' ? ['bwrap'] : [])]) {
@@ -59,13 +59,14 @@ async function main() {
       await ownLock()
       const disk=await statfs(config.workRoot,{bigint:true})
       const available=disk.bavail*disk.bsize
-      if(available < BigInt(job.data.originalBytes)+BigInt(config.maxOutputBytes)*3n+BigInt(config.diskReserveBytes))throw new Error('WORKER_DISK_CAPACITY')
+      if(available < BigInt(job.data.originalBytes)+BigInt(config.maxOutputBytes)*3n+BigInt(config.diskReserveBytes)+(job.data.bundleEntry?BigInt(config.maxArchiveMb)*1024n*1024n:0n))throw new Error('WORKER_DISK_CAPACITY')
       dir = await mkdtemp(join(config.workRoot, 'formshift-job-'))
-      const input = join(dir, 'input.' + job.data.inputFormat.toLowerCase())
+      const uploaded = join(dir, 'input.' + (job.data.bundleEntry?'zip':job.data.inputFormat.toLowerCase()))
       await bounded(job.updateProgress(5))
-      await downloadInput(storage, config, job.data, input, controller.signal)
+      await downloadInput(storage, config, job.data, uploaded, controller.signal)
+      const input=job.data.bundleEntry?await unpackBundle(config,dir,uploaded,job.data.bundleEntry,controller.signal):uploaded
       await bounded(job.updateProgress(25))
-      const result = job.data.purpose === 'preview' ? await createPreview(config, dir, input, job.data.inputFormat, controller.signal) : await convertJob(config, dir, input, job.data.inputFormat, job.data.outputFormat, job.data.compression, controller.signal)
+      const result = job.data.purpose === 'preview' ? await createPreview(config, dir, input, job.data.inputFormat, controller.signal) : await convertJob(config, dir, input, job.data.inputFormat, job.data.outputFormat, job.data.compression, controller.signal,!!job.data.bundleEntry)
       controller.signal.throwIfAborted()
       await bounded(job.updateProgress(85))
       await ownLock()

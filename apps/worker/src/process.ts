@@ -81,15 +81,15 @@ async function objHasMaterials(input: string, signal: AbortSignal) {
   }
   return false
 }
-export async function runConverter(config: WorkerConfig, dir: string, input: string, output: string, format: ModelFormat, signal: AbortSignal): Promise<string> {
+export async function runConverter(config: WorkerConfig, dir: string, input: string, output: string, format: ModelFormat, signal: AbortSignal,bundled=false): Promise<string> {
   const ext = '.' + format.toLowerCase()
   if (format === 'STL') await run(config, dir, [config.python, '-I', join(config.scriptsDir, 'validate-stl.py'), input], signal, config.memoryMb)
-  else await run(config, dir, [config.python, '-I', join(config.scriptsDir, 'validate-input.py'), input, ext], signal, config.memoryMb)
+  else if(!bundled) await run(config, dir, [config.python, '-I', join(config.scriptsDir, 'validate-input.py'), input, ext], signal, config.memoryMb)
   if (format === 'GLB') { await readGlbInfo(input, config.maxOutputBytes); return input }
   let native: string[] | null = null
   if (format === '3MF') native = ['threemf-to-glb.py']
   if (format === 'PLY' || (format === 'STL' && config.engine === 'native')) native = ['dense-mesh-to-glb.py', '--ext', ext]
-  if (format === 'OBJ' && (await stat(input)).size >= 30 * 1024 * 1024 && !await objHasMaterials(input, signal)) native = ['dense-mesh-to-glb.py', '--ext', ext]
+  if (!bundled && format === 'OBJ' && (await stat(input)).size >= 30 * 1024 * 1024 && !await objHasMaterials(input, signal)) native = ['dense-mesh-to-glb.py', '--ext', ext]
   if (native) {
     const [script, ...extra] = native
     try {
@@ -156,16 +156,16 @@ async function verifyOther(config: WorkerConfig, dir: string, path: string, form
   }
   return info.size
 }
-export async function convertJob(config: WorkerConfig, dir: string, input: string, source: ModelFormat, target: ModelFormat, level: CompressionLevel, signal: AbortSignal) {
+export async function convertJob(config: WorkerConfig, dir: string, input: string, source: ModelFormat, target: ModelFormat, level: CompressionLevel, signal: AbortSignal, bundled=false) {
   const output = join(dir, 'output.' + target.toLowerCase())
   const warning = getOutputWarning(target)
   if (target === 'GLB') {
-    const converted = await runConverter(config, dir, input, output, source, signal)
+    const converted = await runConverter(config, dir, input, output, source, signal,bundled)
     return optimizeGlb(config, dir, converted, level, signal)
   }
   if (target === 'GLTF') {
     // Blender 4.x removed embedded glTF; use the existing GLB exporter only here.
-    const converted = await runConverter(config, dir, input, join(dir, 'intermediate.glb'), source, signal)
+    const converted = await runConverter(config, dir, input, join(dir, 'intermediate.glb'), source, signal,bundled)
     await readGlbInfo(converted, config.maxOutputBytes)
     await run(config, dir, [config.python, '-I', join(config.scriptsDir, 'embed-gltf.py'), converted, output], signal, config.memoryMb)
     const bytes = await verifyOther(config, dir, output, target, signal)
@@ -173,7 +173,7 @@ export async function convertJob(config: WorkerConfig, dir: string, input: strin
   }
   const ext = '.' + source.toLowerCase()
   if (source === 'STL') await run(config, dir, [config.python, '-I', join(config.scriptsDir, 'validate-stl.py'), input], signal, config.memoryMb)
-  else await run(config, dir, [config.python, '-I', join(config.scriptsDir, 'validate-input.py'), input, ext], signal, config.memoryMb)
+  else if(!bundled) await run(config, dir, [config.python, '-I', join(config.scriptsDir, 'validate-input.py'), input, ext], signal, config.memoryMb)
   if (target === 'PDF' || target === 'SVG') {
     if (source !== 'PDF' && source !== 'SVG') throw new Error('INVALID_VECTOR_ROUTE')
     let path = output
@@ -239,4 +239,10 @@ export async function createPreview(config: WorkerConfig, dir: string, input: st
   }
   deadline.throwIfAborted()
   return {path:output,outputBytes:bytes,convertedBytes:bytes,compressionApplied:false,warning:kind==='PNG'?'Raster document preview (first page for PDF).':'Approximate static geometry preview; large meshes may be sampled.'}
+}
+
+export async function unpackBundle(config:WorkerConfig,dir:string,archive:string,entry:string,signal:AbortSignal){
+  const root=join(dir,'assets')
+  await run(config,dir,[config.python,'-I',join(config.scriptsDir,'extract-bundle.py'),archive,root,entry],signal,config.memoryMb)
+  return join(root,entry)
 }
