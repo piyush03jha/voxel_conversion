@@ -16,8 +16,8 @@ try {
   const {getSupportedOutputs,ACCEPTED_FORMATS}=require(join(temp,'packages/shared/src/compatibility.js'))
   const encode=text=>new TextEncoder().encode(text).buffer
   const stl=encode('solid t\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid t\n')
-  const obj=encode('v 0 0 0\nv 1 0 0\nv 0 0 -1\nf 1 2 3\n')
-  const ply=encode('ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nelement face 1\nproperty list uchar int vertex_indices\nend_header\n0 0 0\n1 0 0\n0 1 0\n3 0 1 2\n')
+  const obj=encode('v 0 0 0\nv 0.001 0 0\nv 0 0 -0.001\nf 1 2 3\n')
+  const ply=encode('ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nelement face 1\nproperty list uchar int vertex_indices\nend_header\n0 0 0\n0.001 0 0\n0 0.001 0\n3 0 1 2\n')
   const expected=['STL','OBJ','PLY','GLB','GLTF']
   for(const [input,bytes] of [['STL',stl],['OBJ',obj],['PLY',ply]]){
     for(const output of expected){
@@ -31,11 +31,14 @@ try {
         assert.equal(round.byteLength,134)
         // Triangle world coordinates must survive round trip, including Z/Y-up conversion.
         const d=new DataView(round)
-        assert.deepEqual(Array.from({length:9},(_,i)=>d.getFloat32(96+i*4,true)||0),[0,0,0,1,0,0,0,1,0])
+        assert.deepEqual(Array.from({length:9},(_,i)=>Math.round(d.getFloat32(96+i*4,true)*1e6)/1e6||0),[0,0,0,1,0,0,0,1,0])
       }
     }
   }
   const glb=await convertBytes(stl,'STL','GLB').arrayBuffer()
+  const header=new DataView(glb)
+  const dimensions=JSON.parse(new TextDecoder().decode(new Uint8Array(glb,20,header.getUint32(12,true)))).accessors[0]
+  assert.ok(Math.abs(dimensions.max[0]-dimensions.min[0]-0.001)<1e-9,'1 mm STL becomes 0.001 m glTF')
   const gltf=await convertBytes(glb,'GLB','GLTF').arrayBuffer()
   const again=await convertBytes(gltf,'GLTF','GLB').arrayBuffer()
   assert.deepEqual(new Uint8Array(again),new Uint8Array(glb))

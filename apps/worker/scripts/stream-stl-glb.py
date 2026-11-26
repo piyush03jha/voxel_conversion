@@ -36,7 +36,7 @@ def convert(source,target):
                     axis=j%3
                     lo[axis]=min(lo[axis],v);hi[axis]=max(hi[axis],v)
         length=count*36
-        doc={"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0]}],"nodes":[{"mesh":0,"rotation":[-math.sqrt(.5),0,0,math.sqrt(.5)]}],"meshes":[{"primitives":[{"attributes":{"POSITION":0},"mode":4}]}],"buffers":[{"byteLength":length}],"bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":length,"target":34962}],"accessors":[{"bufferView":0,"componentType":5126,"count":count*3,"type":"VEC3","min":lo,"max":hi}]}
+        doc={"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0]}],"nodes":[{"mesh":0,"scale":[0.001,0.001,0.001],"rotation":[-math.sqrt(.5),0,0,math.sqrt(.5)]}],"meshes":[{"primitives":[{"attributes":{"POSITION":0},"mode":4}]}],"buffers":[{"byteLength":length}],"bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":length,"target":34962}],"accessors":[{"bufferView":0,"componentType":5126,"count":count*3,"type":"VEC3","min":lo,"max":hi}]}
         encoded=json.dumps(doc,separators=(",",":")).encode()
         encoded+=b" "*((-len(encoded))%4)
         with open(target,"wb") as out:

@@ -420,7 +420,8 @@ try:
     elif ext == ".ply":
         bpy.ops.wm.ply_import(filepath=input_path)
     elif ext == ".stl":
-        bpy.ops.wm.stl_import(filepath=input_path)
+        # STL is assumed to be millimetres; internal Blender geometry uses metres.
+        bpy.ops.wm.stl_import(filepath=input_path, global_scale=0.001, use_scene_unit=False)
     elif ext in {".gltf", ".glb"}:
         bpy.ops.import_scene.gltf(filepath=input_path)
     elif ext in {".usd", ".usda", ".usdc", ".usdz"}:

@@ -38,7 +38,8 @@ export function getCompressionLevels(output: ModelFormat): readonly CompressionL
 }
 export function getOutputWarning(output: ModelFormat): string | null {
   if (output === 'OBJ') return 'Single-file OBJ geometry, UVs and normals; no MTL or textures. Animation is not preserved.'
-  if (output === 'STL' || output === 'PLY' || output === '3MF') return 'Static mesh export; animation and most materials are not preserved.'
+  if (output === 'STL') return 'STL coordinates are exported in millimetres for 3D printing. Static geometry only; materials and animation are not preserved.'
+  if (output === 'PLY' || output === '3MF') return 'Static mesh export; animation and most materials are not preserved.'
   if (output === 'BVH') return 'Requires exactly one compatible armature; exports skeleton motion only.'
   if (output === 'SVG' || output === 'PDF') return '2D document conversion only; PDF to SVG uses the first page. Same-format documents are returned unchanged, not sanitized.'
   if (output==='USDZ') return 'USDZ packages supported materials and textures; unsupported scene features may be lost.'

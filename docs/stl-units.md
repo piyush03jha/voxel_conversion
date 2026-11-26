@@ -1,0 +1,7 @@
+# STL unit convention
+
+STL has no units. For this printer-oriented converter, interpret STL input coordinates as millimetres and export STL coordinates in millimetres. Blender and glTF use metres internally. OBJ/PLY retain their existing unitless interpretation (one coordinate unit treated as one metre); models authored in other units need explicit rescaling. No heuristic based on file size or bounding box. 3MF uses its declared unit and build/component transforms. Do not multiply the raw 3MF coordinates indiscriminately.
+
+Blender STL import uses global_scale=0.001 with scene-unit conversion disabled. STL export uses global_scale=1000*scene.unit_settings.scale_length, scene-unit conversion disabled, for baseline and compression candidates. Native indexed and streaming STL→GLB add a uniform 0.001 root scale without rewriting coordinate buffers. Browser geometry routes normalize STL inputs and convert back to millimetres for STL output. Other formats' unit conventions are not universally verified. Heartbeat v8 prevents mixing older worker versions.
+
+Regression: npm run test:browser, npm run test:native, npm run test:large. Actual Blender integration test: npm run test:units (requires installed Blender and 3MF addon); in Docker run python3 /path/to/scripts/test-units.py (see worker Dockerfile). Test millimetres, inches, metres, build transforms and STL→3MF→STL dimensions. Previously produced tiny STLs must be reconverted from the original, not blindly scaled based on extension.

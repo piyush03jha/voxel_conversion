@@ -406,7 +406,7 @@ def reduce_indexed(verts, tris, cols):
 
 
 # ------------------------------------------------------------------- GLB ---
-def write_glb(dst, verts, tris, colors, z_up):
+def write_glb(dst, verts, tris, colors, z_up, unit_scale=1.0):
     nv, nt = len(verts) // 3, len(tris) // 3
     if nt == 0:
         raise Unsupported("mesh has no triangles")
@@ -433,6 +433,8 @@ def write_glb(dst, verts, tris, colors, z_up):
         views.append({"buffer": 0, "byteOffset": off, "byteLength": len(data), "target": target})
         off += len(data) + ((-len(data)) % 4)
     root = {"mesh": 0}
+    if unit_scale != 1.0:
+        root['scale'] = [unit_scale] * 3
     if z_up:
         root["rotation"] = [-math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5)]
     doc = {
@@ -480,7 +482,7 @@ def write_stl_stream_glb(dst, make_iter):
     doc = {
         "asset": {"version": "2.0", "generator": "voxel3d-streaming-stl"},
         "scene": 0, "scenes": [{"nodes": [0]}],
-        "nodes": [{"mesh": 0, "rotation": [-math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5)]}],
+        "nodes": [{"mesh": 0, "scale": [0.001, 0.001, 0.001], "rotation": [-math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5)]}],
         "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "material": 0, "mode": 4}]}],
         "materials": [{"pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.8, 0.8, 1], "metallicFactor": 0, "roughnessFactor": 0.8}}],
         "accessors": [{"bufferView": 0, "componentType": 5126, "count": faces * 3, "type": "VEC3", "min": lo, "max": hi}],
@@ -549,7 +551,7 @@ def convert(src, dst, ext):
             if not all(math.isfinite(v) for v in lo + hi):
                 raise Invalid("STL contains non-finite coordinates")
             verts, tris, colors = reduce_soup(make_iter, lo, hi)
-        write_glb(dst, verts, tris, colors, z_up=True)
+        write_glb(dst, verts, tris, colors, z_up=True, unit_scale=0.001)
         return
     if ext == ".obj":
         verts, tris, colors = read_obj(src)

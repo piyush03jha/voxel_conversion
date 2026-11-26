@@ -35,6 +35,7 @@ class LargeFileTests(unittest.TestCase):
                 self.assertEqual((magic,version,kind,bin_kind),(b"glTF",2,b"JSON",b"BIN\0"))
                 self.assertEqual(total,dst.stat().st_size)
                 self.assertEqual(doc["accessors"][0]["count"],n*3)
+                self.assertEqual(doc['nodes'][0]['scale'],[0.001]*3)
                 self.assertEqual(binary,n*36)
                 self.assertEqual(f.read(36),record[12:48])
             with src.open("r+b") as f:

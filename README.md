@@ -57,3 +57,4 @@ Large-upload update: [ADVFX-based multipart uploads and resource sizing](docs/la
 Batch tools: [/batch](/batch) and [/compress/batch](/compress/batch). See [batch processing](docs/batch-processing.md) for capabilities, resource limits and local tests. Conversion and compression are separate API operations; no combined format change and optional compression.
 
 Single-model folders and ZIP packages: [/package](/package), [/compress/package](/compress/package). See [model packages](docs/model-packages.md).
+STL dimensions: [millimetre unit convention and regression tests](docs/stl-units.md).

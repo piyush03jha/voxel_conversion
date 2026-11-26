@@ -99,7 +99,11 @@ def export_3mf(path, level):
 def export_scene(target, path, level, package_output=False):
     if target == "STL":
         need_mesh()
-        checked(bpy.ops.wm.stl_export, filepath=path, ascii_format=False, export_selected_objects=False, apply_modifiers=True)
+        meters_per_unit = bpy.context.scene.unit_settings.scale_length
+        if not math.isfinite(meters_per_unit) or meters_per_unit <= 0:
+            raise RuntimeError('Invalid scene unit scale')
+        # STL has no unit metadata. Emit millimetres for printing, not Blender metres.
+        checked(bpy.ops.wm.stl_export, filepath=path, ascii_format=False, export_selected_objects=False, apply_modifiers=True, global_scale=1000.0 * meters_per_unit, use_scene_unit=False)
     elif target == "OBJ":
         need_mesh()
         checked(bpy.ops.wm.obj_export, filepath=path, export_materials=package_output, path_mode='COPY' if package_output else 'AUTO', export_pbr_extensions=package_output, export_uv=True, export_normals=True, apply_modifiers=True, export_colors=True)
