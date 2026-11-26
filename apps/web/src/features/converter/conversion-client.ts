@@ -4,7 +4,7 @@ import type { CompressionLevel, ModelFormat } from './compatibility'
 export const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
 export type Health = { status: string; conversionAvailable: boolean }
 export type JobSession = { id: string; token: string; expiresAt: number }
-export type Session = JobSession & { uploadExpiresAt?: number; multipart?: {partSize:number;partCount:number}; uploadUrl: string; uploadHeaders: Record<string,string> }
+export type Session = JobSession & { reused?:boolean; uploadExpiresAt?: number; multipart?: {partSize:number;partCount:number}; uploadUrl: string; uploadHeaders: Record<string,string> }
 export type JobStatus = { status: string; previewKind?: 'GLB' | 'PNG' | null; position?: number | null; etaSeconds?: number | null; progress?: number | null; originalBytes?: number; convertedBytes?: number | null; outputBytes?: number | null; reductionPercent?: number | null; compressionReductionPercent?: number | null; warning?: string | null; error?: string | null }
 
 async function request<T>(path: string, options: RequestInit = {}, timeoutMs = 20000): Promise<T> {
@@ -135,4 +135,4 @@ export const createOutputPreview = (session:JobSession, signal:AbortSignal) => r
 
 export type BatchSession=JobSession
 export const createBatch=(operation:'conversion'|'compression',signal:AbortSignal)=>request<BatchSession>('/jobs/batches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({operation}),signal})
-export const createBatchUpload=(batch:BatchSession,file:File,filename:string,output:ModelFormat,compression:CompressionLevel,signal:AbortSignal,bundleEntry?:string)=>request<Session>('/jobs/batches/'+encodeURIComponent(batch.id)+'/uploads',{method:'POST',headers:{...auth(batch),'Content-Type':'application/json'},body:JSON.stringify({filename,size:file.size,outputFormat:output,compression,color:null,...(bundleEntry?{bundleEntry}:{})}),signal})
+export const createBatchUpload=(batch:BatchSession,file:File,filename:string,output:ModelFormat,compression:CompressionLevel,signal:AbortSignal,bundleEntry?:string,packageOutput=false,purpose:'conversion'|'preview'='conversion',reuseSource?:JobSession)=>request<Session>('/jobs/batches/'+encodeURIComponent(batch.id)+'/uploads',{method:'POST',headers:{...auth(batch),'Content-Type':'application/json'},body:JSON.stringify({filename,size:file.size,outputFormat:output,compression,color:null,purpose,...(bundleEntry?{bundleEntry}:{}),...(packageOutput?{packageOutput:true}:{}),...(reuseSource?{reuseSource:{id:reuseSource.id,token:reuseSource.token}}:{})}),signal},90000)

@@ -10,16 +10,16 @@ import type {Result} from '../converter/use-conversion'
 import ModelPreview from '../converter/ModelPreview'
 import {Scratch,expandAssets,zipFiles} from './zip'
 import type {Asset} from './zip'
-import {discover} from './discover'
+import {discover,attachFolder} from './discover'
 import type {Model} from './discover'
-import {BATCH_MAX_ENTRIES} from '../../../../../packages/shared/src/batch'
+import {BATCH_MAX_ENTRIES,supportsPackage,supportsPackageExport} from '../../../../../packages/shared/src/batch'
 
 type Pending={session:Session;uploaded:boolean;target:ModelFormat}
-type Row={id:number;model:Model;target:ModelFormat;state:'ready'|'working'|'done'|'failed'|'paused'|'skipped';stage:string;progress:number|null;result?:Result;pending?:Pending;error?:string}
+type Row={id:number;include:boolean;previewFile?:File;sourceSession?:Session;previewPending?:Session;packageFile?:File;model:Model;target:ModelFormat;state:'ready'|'working'|'done'|'failed'|'paused'|'skipped';stage:string;progress:number|null;result?:Result;pending?:Pending;error?:string}
 function size(bytes:number){return bytes>=1024**3?(bytes/1024**3).toFixed(2)+' GB':bytes>=1024**2?(bytes/1024**2).toFixed(1)+' MB':Math.max(1,Math.round(bytes/1024))+' KB'}
 function trigger(url:string,name:string,local=false){const a=document.createElement('a');a.href=url;a.download=name;a.rel='noreferrer';document.body.append(a);a.click();a.remove();if(local)setTimeout(()=>URL.revokeObjectURL(url),60000)}
 function fileName(file:File){return file.name.replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').slice(0,180)}
-function resultName(row:Row){return outputName(fileName(row.model.asset.file),row.target)}
+function resultName(row:Row){return row.result?.name??outputName(fileName(row.model.asset.file),row.target)}
 function zipName(row:Row){return String(row.id+1).padStart(3,'0')+'-'+resultName(row)}
 function defaultTarget(model:Model,common:ModelFormat){return common!==model.format&&isConversionSupported(model.format,common)?common:getOutputGroups(model.format).recommended[0]??'GLB'}
 async function dropped(event:DragEvent):Promise<Asset[]>{
@@ -38,6 +38,7 @@ async function dropped(event:DragEvent):Promise<Asset[]>{
 }
 
 export default function BatchWorkspace({compress}:{compress:boolean}){
+  const assetsRef=useRef<Asset[]>([])
   const [rows,setRows]=useState<Row[]>([]),rowsRef=useRef<Row[]>([])
   const [common,setCommon]=useState<ModelFormat>('GLB'),[level,setLevel]=useState<CompressionLevel>('Medium')
   const [selected,setSelected]=useState(0),[scanning,setScanning]=useState(false),[working,setWorking]=useState(false),[packing,setPacking]=useState(false)
@@ -49,7 +50,7 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
   const batch=useRef<BatchSession|null>(null),active=useRef<AbortController|null>(null),stop=useRef(false),alive=useRef(true)
   const filesInput=useRef<HTMLInputElement>(null),folderInput=useRef<HTMLInputElement>(null)
   const locked=scanning||working||packing
-  const pending=rows.some(row=>row.pending)
+  const pending=rows.some(row=>row.pending||row.previewPending)
   function replace(next:Row[]){rowsRef.current=next;if(alive.current)setRows(next)}
   function patch(id:number,value:Partial<Row>){replace(rowsRef.current.map(row=>row.id===id?{...row,...value}:row))}
   useEffect(()=>{
@@ -72,10 +73,10 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
       setMessage('Detecting models and related assets…')
       const models=await discover(assets,controller.signal)
       if(!models.length)throw new Error('No supported models found. Add STL, OBJ, FBX, GLB, glTF, 3MF, PLY, USD variants, ABC, BVH, SVG or PDF.')
-      const next=models.map((model,id):Row=>({id,model,target:compress?model.format:defaultTarget(model,common),state:'ready',stage:'Ready',progress:null}))
+      const next=models.map((model,id):Row=>({id,include:true,model,target:compress?model.format:defaultTarget(model,common),state:'ready',stage:'Ready',progress:null}))
       await scratch.current.close();scratch.current=fresh
       await resultScratch.current.close();resultScratch.current=new Scratch();cachedResults.current.clear()
-      batch.current=null;replace(next);setSelected(0);setMessage(models.length+' models found · '+(assets.length-models.length)+' other asset files detected')
+      assetsRef.current=assets;batch.current=null;replace(next);setSelected(0);setMessage(models.length+' models found · '+(assets.length-models.length)+' other asset files detected')
     }catch(e){await fresh.close();if(!controller.signal.aborted)setError(e instanceof Error?e.message:'File scan failed')}
     finally{if(active.current===controller)active.current=null;if(alive.current)setScanning(false)}
   }
@@ -83,7 +84,7 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
   function reason(row:Row){
     if(row.model.error)return row.model.error
     if(!row.model.asset.file.size)return 'Empty model'
-    if(compress){if(row.model.dependencies.length)return 'Compression of external dependency bundles is not supported; convert to GLB first.';if(!getCompressionLevels(row.model.format).includes(level)||level==='None')return 'Compression is unavailable for '+row.model.format}
+    if(compress){if((!row.model.dependencies.length&&!getCompressionLevels(row.model.format).includes(level))||level==='None')return 'Compression is unavailable for '+row.model.format}
     else if(row.target===row.model.format||!isConversionSupported(row.model.format,row.target))return 'Selected conversion is not supported'
     return ''
   }
@@ -110,8 +111,10 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
     if(why&&!row.pending){patch(row.id,{state:'skipped',stage:'Skipped',error:why});return true}
     const target=compress?row.model.format:row.target,compression=compress?level:'None'
     const model=row.model,source=model.asset.file
+    const packaged=compress?model.dependencies.length>0:supportsPackageExport(target)
+    const name=outputName(fileName(source),target)+(packaged?'.zip':'')
     patch(row.id,{state:'working',stage:'Preparing',progress:0,error:undefined})
-    if(!row.pending&&!model.dependencies.length&&browserRoute(model.format,target,source.size,compression)){
+    if(!row.pending&&!model.dependencies.length&&!packaged&&browserRoute(model.format,target,source.size,compression)){
       try{patch(row.id,{stage:'Processing locally',progress:null});const blob=await convertLocally(source,model.format,target,signal);patch(row.id,{state:'done',stage:'Completed in browser',progress:100,result:{name:resultName(row),bytes:blob.size,originalBytes:source.size,convertedBytes:null,warning:getOutputWarning(target),blob}});return true}
       catch(e){signal.throwIfAborted();if(!allowServer){patch(row.id,{state:'failed',stage:'Local processing failed',error:e instanceof Error?e.message:'Unsupported local model'});return true}}
     }
@@ -120,16 +123,17 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
     try{
       if(!p){
         if(!batch.current||Date.now()>=batch.current.expiresAt)batch.current=await api.createBatch(operation,signal)
-        let upload=source
-        if(model.dependencies.length){
+        let upload=row.packageFile??source
+        if(model.dependencies.length&&!row.packageFile){
           patch(row.id,{stage:'Bundling related model files',progress:null})
           const blob=await zipFiles([model.asset,...model.dependencies],signal)
-          upload=new File([blob],'dependencies.zip',{type:'application/zip'})
+          upload=new File([blob],'dependencies.zip',{type:'application/zip'});patch(row.id,{packageFile:upload})
         }
-        const session=await api.createBatchUpload(batch.current,upload,source.name,target,compression,signal,model.dependencies.length?model.asset.path:undefined)
-        p={session,target,uploaded:false}
+        const reuse=row.sourceSession&&Date.now()+120000<row.sourceSession.expiresAt?row.sourceSession:undefined
+        const session=await api.createBatchUpload(batch.current,upload,source.name,target,compression,signal,model.dependencies.length?model.asset.path:undefined,packaged,'conversion',reuse)
+        p={session,target,uploaded:session.reused===true}
         patch(row.id,{pending:p,stage:'Uploading',progress:0})
-        await api.upload(session,upload,signal,progress=>patch(row.id,{progress,stage:'Uploading'}))
+        if(!session.reused)await api.upload(session,upload,signal,progress=>patch(row.id,{progress,stage:'Uploading'}))
         p={...p,uploaded:true};patch(row.id,{pending:p,stage:'Submitting',progress:null})
       }else if(!p.uploaded){
         // A lost upload response may mean the object is already complete. Try
@@ -139,7 +143,7 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
       }
       const job=await track(row,p,signal)
       if(job.status==='completed'&&typeof job.outputBytes==='number'&&job.outputBytes>0){
-        patch(row.id,{pending:undefined,state:'done',stage:'Completed on server',progress:100,result:{name:resultName(row),bytes:job.outputBytes,originalBytes:job.originalBytes??source.size,convertedBytes:job.convertedBytes??null,warning:job.warning??null,session:p.session}})
+        patch(row.id,{pending:undefined,state:'done',stage:'Completed on server',progress:100,sourceSession:p.session,result:{name,bytes:job.outputBytes,originalBytes:job.originalBytes??source.size,convertedBytes:job.convertedBytes??null,warning:job.warning??null,session:p.session}})
       }else patch(row.id,{pending:undefined,state:'failed',stage:job.status,error:job.error??'Server processing did not complete',progress:null})
       return true
     }catch(e){
@@ -154,17 +158,57 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
   }
   async function run(only?:number){
     if(active.current)return
+    if(rowsRef.current.some(r=>r.previewPending)){setError('Resume the package preview first.');return}
     const unknown=rowsRef.current.find(r=>r.pending)
     if(unknown&&only!==undefined&&unknown.id!==only){setError('Resume the unfinished server job before starting another file.');return}
     const controller=new AbortController();active.current=controller;stop.current=false;setStopRequested(false);setWorking(true);setError('')
     try{
-      const candidates=rowsRef.current.filter(row=>only===undefined?row.state!=='done':row.id===only&&row.state!=='done')
+      const candidates=rowsRef.current.filter(row=>only===undefined?row.include&&row.state!=='done':row.id===only&&row.include&&row.state!=='done')
       // The uncertain job owns the one server slot; resume it first.
       candidates.sort((a,b)=>Number(!!b.pending)-Number(!!a.pending)||a.id-b.id)
       for(const row of candidates){if(stop.current||controller.signal.aborted)break;setMessage('Processing '+row.model.asset.path);if(!await processRow(row,controller.signal))break}
       setMessage(rowsRef.current.some(row=>row.pending)?'Tracking paused. Resume the existing server job before continuing.':stop.current?'Stopped after current file. Completed files remain downloadable.':'Batch pass finished. Download results or retry failed files.')
     }catch(e){if(!controller.signal.aborted)setError(e instanceof Error?e.message:'Batch processing interrupted')}
     finally{if(active.current===controller)active.current=null;if(alive.current){setWorking(false);setStopRequested(false)}}
+  }
+  async function previewPackage(row:Row){
+    if(active.current||!serverReady||rowsRef.current.some(r=>r.pending||r.previewPending&&r.id!==row.id))return
+    const controller=new AbortController();active.current=controller;setWorking(true);setError('')
+    const signal=controller.signal
+    let session=row.previewPending,uploaded=!!session
+    try{
+      if(!session){
+        if(!batch.current||Date.now()>=batch.current.expiresAt)batch.current=await api.createBatch(operation,signal)
+        let file=row.packageFile
+        if(!file){file=new File([await zipFiles([row.model.asset,...row.model.dependencies],signal,setMessage)],'dependencies.zip',{type:'application/zip'});patch(row.id,{packageFile:file})}
+        session=await api.createBatchUpload(batch.current,file,row.model.asset.file.name,'GLB','None',signal,row.model.asset.path,false,'preview',row.sourceSession&&Date.now()+120000<row.sourceSession.expiresAt?row.sourceSession:undefined)
+        patch(row.id,{previewPending:session})
+        if(!session.reused)await api.upload(session,file,signal,p=>setMessage('Uploading package for preview · '+p+'%'))
+        uploaded=true
+      }
+      while(Date.now()<session.expiresAt){
+        signal.throwIfAborted()
+        const job=await api.status(session,signal)
+        if(job.status==='awaiting-upload')await api.submit(session,signal)
+        else if(job.status==='completed'){
+          if(!job.outputBytes||job.previewKind!=='GLB')throw new Error('Invalid preview result')
+          const blob=await api.fetchPreview(session,job.outputBytes,signal)
+          patch(row.id,{previewFile:new File([blob],'package-preview.glb'),sourceSession:session,previewPending:undefined})
+          setMessage('Package preview ready. Conversion can reuse the uploaded source.');return
+        }else if(['failed','expired','cancelled'].includes(job.status)){patch(row.id,{previewPending:undefined});throw new Error(job.error??'Package preview '+job.status)}
+        setMessage(job.status==='active'?'Generating package preview…':'Package preview waiting for worker…')
+        await api.wait(2500,signal)
+      }
+      patch(row.id,{previewPending:undefined});throw new Error('Preview expired')
+    }catch(e){
+      if(session&&!uploaded){try{await api.cancel(session);patch(row.id,{previewPending:undefined})}catch{/* keep token for reconciliation */}}
+      setError(e instanceof Error?e.message:'Package preview unavailable')
+    }finally{if(active.current===controller)active.current=null;if(alive.current)setWorking(false)}
+  }
+  function attach(row:Row){
+    if(active.current||pending||row.state==='done')return
+    try{const model=attachFolder(row.model,assetsRef.current);patch(row.id,{model,packageFile:undefined,sourceSession:undefined,previewFile:undefined,state:'ready',stage:'Folder assets attached'})}
+    catch(e){setError(e instanceof Error?e.message:'Unable to attach folder')}
   }
   async function downloadOne(row:Row){
     if(!row.result)return
@@ -232,11 +276,11 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
             {compress?<span>{row.model.format} → {row.model.format}</span>:<label className="batch-target">To <select value={row.target} disabled={locked||pending||row.state==='done'} onChange={e=>patch(row.id,{target:e.target.value as ModelFormat,state:'ready',stage:'Ready',error:undefined})}>
               {!isConversionSupported(row.model.format,row.target)||row.target===row.model.format?<option value={row.target}>{row.target} (incompatible)</option>:null}
               <optgroup label="Recommended">{getOutputGroups(row.model.format).recommended.map(f=><option key={f}>{f}</option>)}</optgroup><optgroup label="Other compatible">{getOutputGroups(row.model.format).other.map(f=><option key={f}>{f}</option>)}</optgroup></select></label>}
-            <div className="batch-row-status"><strong>{row.stage}</strong>{row.progress!==null&&<progress className="job-progress" value={row.progress} max={100}/>}<small>{row.result?size(row.result.bytes)+' · '+((1-row.result.bytes/row.result.originalBytes)*100).toFixed(1)+'% reduction':row.error||reason(row)||getOutputWarning(row.target)||''}</small>{row.result?.warning&&<small>{row.result.warning}</small>}</div>
-            <div className="batch-row-actions">{row.result?<button className="job-action download-action" type="button" onClick={()=>void downloadOne(row)}>Download</button>:<button className="job-action" type="button" disabled={locked||!!reason(row)&&!row.pending||pending&&!row.pending} onClick={()=>void run(row.id)}>{row.pending?'Resume':row.state==='failed'?'Retry':'Process'}</button>}</div>
+            <div className="batch-row-status"><label><input type="checkbox" checked={row.include} disabled={locked||pending||row.state==='done'} onChange={e=>patch(row.id,{include:e.target.checked})}/> Include model</label>{row.model.warning&&<small>{row.model.warning}</small>}{supportsPackage(row.model.format)&&<button className="text-button" type="button" disabled={locked||pending||row.state==='done'} onClick={()=>attach(row)}>Attach supporting folder assets</button>}<strong>{row.stage}</strong>{row.progress!==null&&<progress className="job-progress" value={row.progress} max={100}/>}<small>{row.result?size(row.result.bytes)+' · '+((1-row.result.bytes/row.result.originalBytes)*100).toFixed(1)+'% reduction':row.error||reason(row)||getOutputWarning(row.target)||''}</small>{row.result?.warning&&<small>{row.result.warning}</small>}</div>
+            <div className="batch-row-actions">{row.result?<button className="job-action download-action" type="button" onClick={()=>void downloadOne(row)}>Download</button>:<button className="job-action" type="button" disabled={locked||!row.include||!!reason(row)&&!row.pending||pending&&!row.pending} onClick={()=>void run(row.id)}>{row.pending?'Resume':row.state==='failed'?'Retry':'Process'}</button>}</div>
           </article>)}
         </div>
-        <aside className="batch-preview"><div className="preview-heading"><h2>Model preview</h2></div><p className="format-footnote">{chosen?.model.dependencies.length?'Related-file models may require the converted output for preview.':''}</p><div className="preview-window"><ModelPreview key={chosen?.id??-1} file={chosen?.model.asset.file??null} result={chosen?.result??null} busy={working||packing} serverReady={serverReady}/></div></aside>
+        <aside className="batch-preview"><div className="preview-heading"><h2>Model preview</h2></div><p className="format-footnote">{chosen?.model.dependencies.length?'Package preview includes the related files in its import. Preview shows static geometry only.':''}</p>{chosen&&chosen.model.dependencies.length>0&&!chosen.previewFile&&<button className="job-action" type="button" disabled={locked||!serverReady||!!chosen.model.error||rows.some(r=>r.pending||r.previewPending&&r.id!==chosen.id)} onClick={()=>void previewPackage(chosen)}>{chosen.previewPending?'Resume package preview':'Generate package preview'}</button>}<div className="preview-window"><ModelPreview key={String(chosen?.id??-1)+':'+(chosen?.previewFile?'package':'source')} file={chosen?.model.dependencies.length?chosen.previewFile??null:chosen?.model.asset.file??null} result={chosen?.result??null} busy={working||packing} serverReady={serverReady}/></div></aside>
       </section>
       <p className="privacy-note">One server job per batch. Individual results are available as soon as they finish. Keep this tab open and finish downloads before clearing the batch; server files and download links expire. ZIP downloads use browser temporary disk where available.</p>
     </>}

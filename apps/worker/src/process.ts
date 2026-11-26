@@ -85,7 +85,7 @@ export async function runConverter(config: WorkerConfig, dir: string, input: str
   const ext = '.' + format.toLowerCase()
   if (format === 'STL') await run(config, dir, [config.python, '-I', join(config.scriptsDir, 'validate-stl.py'), input], signal, config.memoryMb)
   else if(!bundled) await run(config, dir, [config.python, '-I', join(config.scriptsDir, 'validate-input.py'), input, ext], signal, config.memoryMb)
-  if (format === 'GLB') { await readGlbInfo(input, config.maxOutputBytes); return input }
+  if (format === 'GLB' && !bundled) { await readGlbInfo(input, config.maxOutputBytes); return input }
   let native: string[] | null = null
   if (format === '3MF') native = ['threemf-to-glb.py']
   if (format === 'PLY' || (format === 'STL' && config.engine === 'native')) native = ['dense-mesh-to-glb.py', '--ext', ext]
