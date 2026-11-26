@@ -49,3 +49,5 @@ Phase 6 UI, bounded model preview, measured queue wait estimation, and resumable
 All 15 formats have preview routes; see [all-format preview](docs/preview-all-formats.md). Server previews are optional, bounded and separate from conversion results.
 
 See [local infrastructure troubleshooting](docs/local-infra.md) for the MinIO replacement, startup checks and migration notes.
+
+See [workspace update](docs/workspace-update.md) for the separate /compress tool, format recommendations, persistent viewer and large-file worker settings.

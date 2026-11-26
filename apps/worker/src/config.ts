@@ -34,7 +34,7 @@ export function workerConfig() {
     optimizerHeapMb: int('WORKER_OPTIMIZER_HEAP_MB', 384, 128, 2048),
     optimizerTimeoutMs: int('WORKER_OPTIMIZER_TIMEOUT_MS', 180000, 1000, 600000),
     optimizer: process.env.GLTF_TRANSFORM_BIN ?? 'gltf-transform',
-    maxOutputBytes: int('WORKER_MAX_OUTPUT_MB', 200, 1, 200) * 1024 * 1024,
+    maxOutputBytes: int('WORKER_MAX_OUTPUT_MB', 512, 1, 512) * 1024 * 1024,
     maxInputBytes: MAX_UPLOAD_BYTES,
     maxTriangles: int('WORKER_MAX_TRIANGLES', 4200000, 1, 12000000),
     maxArchiveMb: int('WORKER_MAX_ARCHIVE_MB', 1024, 512, 2048),

@@ -184,24 +184,6 @@ function App() {
           </div>
           {fileError && <p className="error-message" role="alert">{fileError}</p>}
 
-          {compressPage ? <div className="same-format-note"><span className="field-label">FILE FORMAT</span><strong>{inputFormat ?? '—'} → {inputFormat ?? '—'}</strong><p>{inputFormat && getCompressionLevels(inputFormat).length===1 ? 'Compression is unavailable for this format. Convert to GLB or another supported compression format first.' : 'Compression keeps the selected file format.'}</p></div> : <>
-            <div className="format-row">
-              <div className="format-select"><span className="field-label">FROM</span><div className="format-value">{inputFormat ?? '—'} <span>Detected format</span></div></div>
-              <span className="format-arrow" aria-hidden="true">→</span>
-              <div className="format-select output-format"><span className="field-label">TO</span><div className="format-value"><select aria-label="Output format" value={selectedOutput} disabled={!outputs.length || locked} onChange={event=>{setOutputFormat(event.target.value);reset()}}>
-                {!outputs.length && <option value="GLB">Select a file</option>}
-                <optgroup label="Recommended formats">{groups.recommended.map(format=><option key={format} value={format}>{format} — {FORMAT_USE[format]}</option>)}</optgroup>
-                <optgroup label="Other compatible formats">{groups.other.map(format=><option key={format} value={format}>{format}</option>)}</optgroup>
-              </select><span>Selected export</span></div></div>
-            </div>
-            {inputFormat && <div className="recommended-formats">
-              <span className="field-label">RECOMMENDED FOR {inputFormat}</span>
-              <div className="format-choices">{groups.recommended.map(format=><button type="button" key={format} disabled={locked} aria-pressed={selectedOutput===format} onClick={()=>{setOutputFormat(format);reset()}}><strong>{format}</strong><small>{FORMAT_USE[format]}</small></button>)}</div>
-              <details open={groups.other.includes(selectedOutput)}><summary>Other compatible formats ({groups.other.length})</summary><div className="format-choices">{groups.other.map(format=><button type="button" key={format} disabled={locked} aria-pressed={selectedOutput===format} onClick={()=>{setOutputFormat(format);reset()}}><strong>{format}</strong><small>{FORMAT_USE[format]}</small></button>)}</div></details>
-            </div>}
-            <p className="format-footnote">{outputWarning ?? 'Format conversion may change materials or geometry.'}</p>
-          </>}
-
           <div className="preview-heading">
             <div>
               <span className="step-number">02</span>
@@ -223,6 +205,24 @@ function App() {
             </div>
             <span className="settings-badge">OPTIONS</span>
           </div>
+
+          {compressPage ? <div className="same-format-note"><span className="field-label">FILE FORMAT</span><strong>{inputFormat ?? '—'} → {inputFormat ?? '—'}</strong><p>{inputFormat && getCompressionLevels(inputFormat).length===1 ? 'Compression is unavailable for this format. Convert to GLB or another supported compression format first.' : 'Compression keeps the selected file format.'}</p></div> : <>
+            <div className="format-row">
+              <div className="format-select"><span className="field-label">FROM</span><div className="format-value">{inputFormat ?? '—'} <span>Detected format</span></div></div>
+              <span className="format-arrow" aria-hidden="true">→</span>
+              <div className="format-select output-format"><span className="field-label">TO</span><div className="format-value"><select aria-label="Output format" value={selectedOutput} disabled={!outputs.length || locked} onChange={event=>{setOutputFormat(event.target.value);reset()}}>
+                {!outputs.length && <option value="GLB">Select a file</option>}
+                <optgroup label="Recommended formats">{groups.recommended.map(format=><option key={format} value={format}>{format} — {FORMAT_USE[format]}</option>)}</optgroup>
+                <optgroup label="Other compatible formats">{groups.other.map(format=><option key={format} value={format}>{format}</option>)}</optgroup>
+              </select><span>Selected export</span></div></div>
+            </div>
+            {inputFormat && <div className="recommended-formats">
+              <span className="field-label">RECOMMENDED FOR {inputFormat}</span>
+              <div className="format-choices">{groups.recommended.map(format=><button type="button" key={format} disabled={locked} aria-pressed={selectedOutput===format} onClick={()=>{setOutputFormat(format);reset()}}><strong>{format}</strong><small>{FORMAT_USE[format]}</small></button>)}</div>
+              <details open={groups.other.includes(selectedOutput)}><summary>Other compatible formats ({groups.other.length})</summary><div className="format-choices">{groups.other.map(format=><button type="button" key={format} disabled={locked} aria-pressed={selectedOutput===format} onClick={()=>{setOutputFormat(format);reset()}}><strong>{format}</strong><small>{FORMAT_USE[format]}</small></button>)}</div></details>
+            </div>}
+            <p className="format-footnote">{outputWarning ?? 'Format conversion may change materials or geometry.'}</p>
+          </>}
 
           {compressPage ? <>
           <div className="setting-block">

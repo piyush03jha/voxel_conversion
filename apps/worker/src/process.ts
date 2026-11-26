@@ -216,13 +216,13 @@ export async function convertJob(config: WorkerConfig, dir: string, input: strin
   if (level !== 'None' && existsSync(candidate)) {
     try {
       const candidateBytes = await verifyOther(config, dir, candidate, target, signal)
-      if (candidateBytes < bytes && (source !== target || candidateBytes < (await stat(input)).size)) return { path: candidate, convertedBytes: bytes, outputBytes: candidateBytes, compressionApplied: true, warning: [warning, target === '3MF' ? 'ZIP compression retained the mesh geometry.' : 'Static mesh simplification may reduce geometry detail.'].filter(Boolean).join(' ') }
+      if (candidateBytes < bytes && (source !== target || candidateBytes < (await stat(input)).size)) return { path: candidate, convertedBytes: source === target ? (await stat(input)).size : bytes, outputBytes: candidateBytes, compressionApplied: true, warning: [warning, target === '3MF' ? 'ZIP compression retained the mesh geometry.' : 'Static mesh simplification may reduce geometry detail.'].filter(Boolean).join(' ') }
     } catch { signal.throwIfAborted() }
     await rm(candidate, { force: true })
   }
   if (source === target && level !== 'None') {
     const original=(await stat(input)).size
-    if(bytes>=original)return {path:input,convertedBytes:original,outputBytes:original,compressionApplied:false,warning:'Original file retained; compression did not reduce the original file size.'}
+    return {path:input,convertedBytes:original,outputBytes:original,compressionApplied:false,warning:'Original file retained; no smaller verified compression candidate.'}
   }
   return { path: output, convertedBytes: bytes, outputBytes: bytes, compressionApplied: false,
     warning: [warning, level !== 'None' ? 'Compression unavailable or not smaller; original export retained.' : null].filter(Boolean).join(' ') || null }
