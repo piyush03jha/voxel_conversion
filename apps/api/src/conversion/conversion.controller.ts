@@ -9,6 +9,10 @@ export class ConversionController {
   @Header('Cache-Control', 'no-store')
   create(@Body() body: unknown) { return this.jobs.create(body) }
 
+  @Post(':id/parts')
+  @Header('Cache-Control','no-store')
+  parts(@Param('id') id:string,@Body() body:unknown,@Headers('authorization') auth?:string){return this.jobs.signParts(id,body,auth)}
+
   @Post(':id/submit')
   @Header('Cache-Control', 'no-store')
   submit(@Param('id') id: string, @Headers('authorization') auth?: string) { return this.jobs.submit(id, auth) }

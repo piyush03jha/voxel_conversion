@@ -24,7 +24,7 @@ export async function downloadInput(client: S3Client, config: WorkerConfig, data
   let bytes = 0
   const limit = new Transform({ transform(chunk: Buffer, _enc, callback) {
     bytes += chunk.length
-    if (bytes > data.originalBytes || bytes > config.maxInputBytes) callback(new Error('INPUT_TOO_LARGE'))
+    if (bytes > data.originalBytes) callback(new Error('INPUT_TOO_LARGE'))
     else callback(null, chunk)
   } })
   await pipeline(result.Body, limit, createWriteStream(path, { flags: 'wx', mode: 0o600 }), { signal })

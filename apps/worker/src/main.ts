@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { access, constants } from 'node:fs/promises'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, statfs } from 'node:fs/promises'
 import { join } from 'node:path'
 import Redis from 'ioredis'
 import { Worker } from 'bullmq'
@@ -57,6 +57,9 @@ async function main() {
     }
     try {
       await ownLock()
+      const disk=await statfs(config.workRoot,{bigint:true})
+      const available=disk.bavail*disk.bsize
+      if(available < BigInt(job.data.originalBytes)+BigInt(config.maxOutputBytes)*3n+BigInt(config.diskReserveBytes))throw new Error('WORKER_DISK_CAPACITY')
       dir = await mkdtemp(join(config.workRoot, 'formshift-job-'))
       const input = join(dir, 'input.' + job.data.inputFormat.toLowerCase())
       await bounded(job.updateProgress(5))
@@ -76,7 +79,7 @@ async function main() {
       // Persist only a fixed allowlist, not file paths or parser stderr.
       const reason=error instanceof Error?error.message:''
       if(controller.signal.aborted)throw new Error('JOB_DEADLINE_OR_INTERRUPTED')
-      if(['PROCESS_RESOURCE_LIMIT','INVALID_OR_COMPLEX_MODEL','INVALID_OUTPUT','INVALID_GLB_JSON','INVALID_GLB_CONTENT','INVALID_GLB_BIN','INPUT_CHANGED','INPUT_SIZE_MISMATCH'].includes(reason))throw new Error(reason)
+      if(['WORKER_DISK_CAPACITY','PROCESS_RESOURCE_LIMIT','INVALID_OR_COMPLEX_MODEL','INVALID_OUTPUT','INVALID_GLB_JSON','INVALID_GLB_CONTENT','INVALID_GLB_BIN','INPUT_CHANGED','INPUT_SIZE_MISMATCH'].includes(reason))throw new Error(reason)
       throw new Error('CONVERSION_FAILED')
     } finally {
       clearTimeout(timer)

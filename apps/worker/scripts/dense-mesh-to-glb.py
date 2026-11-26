@@ -29,6 +29,7 @@ import os
 import struct
 import sys
 import tempfile
+from itertools import islice
 from array import array
 
 EXIT_INVALID, EXIT_UNSUPPORTED = 2, 3
@@ -39,6 +40,9 @@ UNLIMITED_FACES = MAX_FACES <= 0
 MAX_INPUT_TRIANGLES = int(os.environ.get("VOXEL3D_DENSE_MAX_TRIANGLES", "12000000"))
 MAX_CELLS = int(os.environ.get("VOXEL3D_DENSE_MAX_CELLS", "1500000"))
 MAX_PASSES = 3
+
+# Exact welding has a bounded hash table. If it fills for a dense STL,
+# switch to an unindexed stream instead of reducing surface detail or using Blender.
 
 
 class Invalid(Exception):
@@ -413,22 +417,21 @@ def write_glb(dst, verts, tris, colors, z_up):
         vdata, tdata = array("f", verts), array("I", tris)
         vdata.byteswap()
         tdata.byteswap()
-    chunks = [(vdata.tobytes(), 34962), (tdata.tobytes(), 34963)]
+    chunks = [(memoryview(vdata).cast("B"), 34962), (memoryview(tdata).cast("B"), 34963)]
     attrs = {"POSITION": 0}
     accessors = [
         {"bufferView": 0, "componentType": 5126, "count": nv, "type": "VEC3",
-         "min": [min(verts[i::3]) for i in range(3)], "max": [max(verts[i::3]) for i in range(3)]},
+         "min": [min(islice(verts, i, None, 3)) for i in range(3)], "max": [max(islice(verts, i, None, 3)) for i in range(3)]},
         {"bufferView": 1, "componentType": 5125, "count": nt * 3, "type": "SCALAR"},
     ]
     if colors is not None:
-        chunks.append((bytes(colors), 34962))
+        chunks.append((memoryview(colors).cast("B"), 34962))
         accessors.append({"bufferView": 2, "componentType": 5121, "normalized": True, "count": nv, "type": "VEC4"})
         attrs["COLOR_0"] = 2
-    views, blob, off = [], bytearray(), 0
+    views, off = [], 0
     for data, target in chunks:
         views.append({"buffer": 0, "byteOffset": off, "byteLength": len(data), "target": target})
-        blob += data + b"\x00" * ((-len(data)) % 4)
-        off = len(blob)
+        off += len(data) + ((-len(data)) % 4)
     root = {"mesh": 0}
     if z_up:
         root["rotation"] = [-math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5)]
@@ -439,19 +442,70 @@ def write_glb(dst, verts, tris, colors, z_up):
         "materials": [{"pbrMetallicRoughness": {
             "baseColorFactor": [1, 1, 1, 1] if colors is not None else [0.8, 0.8, 0.8, 1],
             "metallicFactor": 0.0, "roughnessFactor": 0.8}}],
-        "accessors": accessors, "bufferViews": views, "buffers": [{"byteLength": len(blob)}],
+        "accessors": accessors, "bufferViews": views, "buffers": [{"byteLength": off}],
     }
     js = json.dumps(doc, separators=(",", ":")).encode()
     js += b" " * ((-len(js)) % 4)
-    total = 12 + 8 + len(js) + 8 + len(blob)
+    total = 12 + 8 + len(js) + 8 + off
     if total > 0xFFFFFFFF:
         raise Invalid("GLB would exceed 4 GiB")
     with open(dst, "wb") as out:
         out.write(struct.pack("<4sII", b"glTF", 2, total))
         out.write(struct.pack("<I4s", len(js), b"JSON") + js)
-        out.write(struct.pack("<I4s", len(blob), b"BIN\x00"))
-        out.write(blob)
+        out.write(struct.pack("<I4s", off, b"BIN\x00"))
+        for data, _ in chunks:
+            out.write(data)
+            out.write(b"\x00" * ((-len(data)) % 4))
     print("GLB written: %d vertices, %d faces, %d bytes" % (nv, nt, total), flush=True)
+
+
+def write_stl_stream_glb(dst, make_iter):
+    """Two streaming passes; bounded RAM even for millions of unique vertices."""
+    lo, hi = [math.inf] * 3, [-math.inf] * 3
+    faces = 0
+    for t in make_iter():
+        if not all(math.isfinite(v) for v in t):
+            raise Invalid("STL contains non-finite coordinates")
+        if t[:3] == t[3:6] or t[:3] == t[6:9] or t[3:6] == t[6:9]:
+            continue
+        faces += 1
+        if faces > MAX_INPUT_TRIANGLES:
+            raise Invalid("STL exceeds the triangle resource limit")
+        for k in range(3):
+            lo[k] = min(lo[k], t[k], t[k + 3], t[k + 6])
+            hi[k] = max(hi[k], t[k], t[k + 3], t[k + 6])
+    if not faces:
+        raise Invalid("STL contains no non-degenerate triangles")
+    length = faces * 36
+    doc = {
+        "asset": {"version": "2.0", "generator": "voxel3d-streaming-stl"},
+        "scene": 0, "scenes": [{"nodes": [0]}],
+        "nodes": [{"mesh": 0, "rotation": [-math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5)]}],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "material": 0, "mode": 4}]}],
+        "materials": [{"pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.8, 0.8, 1], "metallicFactor": 0, "roughnessFactor": 0.8}}],
+        "accessors": [{"bufferView": 0, "componentType": 5126, "count": faces * 3, "type": "VEC3", "min": lo, "max": hi}],
+        "bufferViews": [{"buffer": 0, "byteOffset": 0, "byteLength": length, "target": 34962}],
+        "buffers": [{"byteLength": length}],
+    }
+    js = json.dumps(doc, separators=(",", ":")).encode()
+    js += b" " * ((-len(js)) % 4)
+    total = 28 + len(js) + length
+    if total > 0xFFFFFFFF:
+        raise Invalid("GLB would exceed its 32-bit length field")
+    pack = struct.Struct("<9f").pack
+    written = 0
+    with open(dst, "wb") as out:
+        out.write(struct.pack("<4sII", b"glTF", 2, total))
+        out.write(struct.pack("<I4s", len(js), b"JSON") + js)
+        out.write(struct.pack("<I4s", length, b"BIN\x00"))
+        for t in make_iter():
+            if t[:3] == t[3:6] or t[:3] == t[6:9] or t[3:6] == t[6:9]:
+                continue
+            out.write(pack(*t))
+            written += 1
+    if written != faces:
+        raise Invalid("STL changed while converting")
+    print("GLB written using bounded-memory STL streaming: %d faces" % faces, flush=True)
 
 
 def convert(src, dst, ext):
@@ -471,11 +525,18 @@ def convert(src, dst, ext):
 
         if UNLIMITED_FACES or n <= MAX_FACES:
             cl, tris = Clusterer(), array("I")
-            for t in make_iter():
-                a, b, c = cl.vid(*t[0:3]), cl.vid(*t[3:6]), cl.vid(*t[6:9])
-                if a != b and b != c and a != c:
-                    tris.extend((a, b, c))
+            try:
+                for t in make_iter():
+                    a, b, c = cl.vid(*t[0:3]), cl.vid(*t[3:6]), cl.vid(*t[6:9])
+                    if a != b and b != c and a != c:
+                        tris.extend((a, b, c))
+            except Retry:
+                # Free the exact-weld working set before streaming.
+                del cl, tris
+                write_stl_stream_glb(dst, make_iter)
+                return
             verts, colors = cl.positions(), None
+            del cl
         else:
             lo, hi = [math.inf] * 3, [-math.inf] * 3
             for t in make_iter():

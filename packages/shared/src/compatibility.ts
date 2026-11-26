@@ -1,4 +1,5 @@
-export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+// No fixed application upload limit. Actual provider and resource constraints apply.
+export const MAX_UPLOAD_BYTES = Number.POSITIVE_INFINITY
 
 export const ACCEPTED_FORMATS = [
   'STL',

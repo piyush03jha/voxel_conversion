@@ -3,6 +3,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import Redis from 'ioredis'
 import { Queue } from 'bullmq'
 import type { ConversionJobData, ConversionJobResult } from '../../../../packages/shared/src/jobs'
+import { SINGLE_PUT_THRESHOLD, multipartPlan, partBytes, PART_URL_BATCH } from '../../../../packages/shared/src/upload'
 import { getCompressionLevels } from '../../../../packages/shared/src/compatibility'
 import { QUEUE_NAME, WORKER_HEARTBEATS, isWorkerRoute } from '../../../../packages/shared/src/jobs'
 import { jobOutputKey, previewKind, PREVIEW_MAX_BYTES } from '../../../../packages/shared/src/preview'
@@ -20,16 +21,22 @@ interface Session extends UploadRequest {
   uploadUntil: number
   expiresAt: number
   cancelled?: boolean
+  multipart?: { uploadId:string; partSize:number; partCount:number }
 }
 const prefix = 'formshift:{sessions}:'
 const slots = prefix + 'slots'
 const due = prefix + 'due'
+const reservedBytes = prefix + 'reserved-input-bytes'
 const sessionKey = (id: string) => prefix + 'session:' + id
 const lockKey = (id: string) => prefix + 'lock:' + id
 // All admission keys share a Redis hash tag. Never store model bytes in Redis.
 const RESERVE = `
 if redis.call('SCARD', KEYS[1]) >= tonumber(ARGV[1]) then return 0 end
 if redis.call('EXISTS', KEYS[3]) == 1 then return 0 end
+local used = 0
+for _, v in ipairs(redis.call('HVALS', KEYS[4])) do used = used + tonumber(v) end
+if used + tonumber(ARGV[5]) > tonumber(ARGV[6]) then return -1 end
+redis.call('HSET', KEYS[4], ARGV[2], ARGV[5])
 redis.call('SET', KEYS[3], ARGV[3])
 redis.call('SADD', KEYS[1], ARGV[2])
 redis.call('ZADD', KEYS[2], ARGV[4], ARGV[2])
@@ -121,7 +128,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     try { return await action() }
     finally { await redis.eval(RELEASE_LOCK, 1, lockKey(id), token).catch(() => undefined) }
   }
-  async create(body: unknown) {
+  async create(body: unknown, internalCopy = false) {
     if (!this.config.acceptJobs || !this.storage.configured) throw new ServiceUnavailableException('Job submission is disabled')
     const request = validateUpload(body)
     if (!isWorkerRoute(request.inputFormat, request.outputFormat) || request.color !== null) throw new BadRequestException('Unsupported conversion pair; custom color is paused')
@@ -132,17 +139,29 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const id = randomUUID()
     const token = randomBytes(32).toString('hex')
     const now = Date.now()
+    const multipart = !internalCopy && request.originalBytes > SINGLE_PUT_THRESHOLD
+    const uploadSeconds = multipart ? this.config.multipartSeconds : this.config.uploadSeconds
     const session: Session = {
       ...request, id, hash: tokenHash(token),
       inputKey: 'temporary/' + id + '/input.' + request.inputFormat.toLowerCase(),
       outputKey: jobOutputKey(id, request.inputFormat, request.outputFormat, request.purpose),
-      uploadUntil: now + this.config.uploadSeconds * 1000,
+      uploadUntil: now + uploadSeconds * 1000,
       expiresAt: now + this.config.retentionSeconds * 1000,
     }
     // Reserve before returning a signed URL, including uploads that never submit.
-    const ok = await redis.eval(RESERVE, 3, slots, due, sessionKey(id), this.config.capacity, id, JSON.stringify(session), session.uploadUntil + 60000)
+    const ok = await redis.eval(RESERVE, 4, slots, due, sessionKey(id), reservedBytes, this.config.capacity, id, JSON.stringify(session), session.uploadUntil + 60000, request.originalBytes, this.config.storageBudgetBytes)
+    if (Number(ok) === -1) throw new HttpException('Temporary storage capacity reached; try again later', HttpStatus.TOO_MANY_REQUESTS)
     if (Number(ok) !== 1) throw new HttpException('Queue capacity reached', HttpStatus.TOO_MANY_REQUESTS)
     try {
+      if(internalCopy)return {id,token,uploadExpiresAt:session.uploadUntil,expiresAt:session.expiresAt,uploadUrl:'',uploadHeaders:UPLOAD_HEADERS}
+      if(multipart){
+        const plan=multipartPlan(request.originalBytes)
+        const uploadId=await this.storage.beginMultipart(session.inputKey)
+        session.multipart={...plan,uploadId}
+        try{await redis.set(sessionKey(id),JSON.stringify(session))}
+        catch(error){await this.storage.abortMultipart(session.inputKey,uploadId).catch(()=>undefined);throw error}
+        return {id,token,uploadUrl:'',uploadHeaders:{},multipart:plan,uploadExpiresAt:session.uploadUntil,expiresAt:session.expiresAt}
+      }
       const uploadUrl = await this.storage.signUpload(session.inputKey, request.originalBytes, this.config.uploadSeconds)
       return { id, token, uploadUrl, uploadHeaders: UPLOAD_HEADERS, uploadExpiresAt: session.uploadUntil, expiresAt: session.expiresAt }
     } catch (error) {
@@ -150,6 +169,17 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       await this.markCancelled(session).catch(() => undefined)
       throw error
     }
+  }
+  async signParts(id:string,body:unknown,authorization?:string){
+    const s=await this.authorized(id,authorization)
+    if(s.cancelled||!s.multipart||Date.now()>=s.uploadUntil)throw new ConflictException('Multipart session unavailable')
+    if(!body||typeof body!=='object'||Array.isArray(body))throw new BadRequestException('Invalid part request')
+    const numbers=(body as {parts?:unknown}).parts
+    if(!Array.isArray(numbers)||numbers.length<1||numbers.length>PART_URL_BATCH||new Set(numbers).size!==numbers.length||numbers.some(n=>!Number.isSafeInteger(n)||n<1||n>s.multipart!.partCount))throw new BadRequestException('Invalid part numbers')
+    const upload=s.multipart
+    const expires=Math.min(900,Math.floor((s.uploadUntil-Date.now())/1000))
+    if(expires<1)throw new ConflictException('Upload session expired')
+    return {parts:await Promise.all(numbers.map(async part=>({part,url:await this.storage.signPart(s.inputKey,upload.uploadId,part,partBytes(s.originalBytes,upload.partSize,part),expires)})))}
   }
   private async markCancelled(s: Session) {
     const { redis } = this.ready()
@@ -167,7 +197,12 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       if (!isWorkerRoute(s.inputFormat, s.outputFormat) || !getCompressionLevels(s.outputFormat).includes(s.compression) || s.color !== null) throw new BadRequestException('Conversion route not enabled')
       if (!this.config.queueTestMode && await this.workerCount() < 1) throw new ServiceUnavailableException('No conversion worker is available')
       if (Date.now() >= s.uploadUntil) throw new ConflictException('Upload session expired')
-      const object = await this.storage.head(s.inputKey)
+      let object = await this.storage.head(s.inputKey)
+      if(!object&&s.multipart){
+        try{await this.storage.completeMultipart(s.inputKey,s.multipart.uploadId,s.originalBytes,s.multipart.partSize,s.multipart.partCount)}
+        catch(error){object=await this.storage.head(s.inputKey);if(!object)throw error}
+        object=object??await this.storage.head(s.inputKey)
+      }
       if (!object) throw new ConflictException('Upload not found; finish uploading first')
       if (object.ContentLength !== s.originalBytes || !object.ETag) {
         await this.markCancelled(s)
@@ -253,7 +288,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const object = await this.storage.head(parent.outputKey)
     if (!object?.ContentLength || !object.ETag) throw new NotFoundException('Output unavailable')
     // The child has its own slot, token, keys and retention. Copy in storage, never buffer bytes in the API.
-    const child = await this.create({ filename: 'output.' + parent.outputFormat.toLowerCase(), size: object.ContentLength, outputFormat: 'GLB', compression: 'None', purpose: 'preview' })
+    const child = await this.create({ filename: 'output.' + parent.outputFormat.toLowerCase(), size: object.ContentLength, outputFormat: 'GLB', compression: 'None', purpose: 'preview' }, true)
     try {
       const session = await this.authorized(child.id, 'Bearer ' + child.token)
       await this.storage.copy(parent.outputKey, session.inputKey, object.ETag)
@@ -305,10 +340,11 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
           }
           if (job) await job.remove()
           if (s) {
+            if(s.multipart)await this.storage.abortMultipart(s.inputKey,s.multipart.uploadId)
             await this.storage.remove(s.inputKey)
             await this.storage.remove(s.outputKey)
           }
-          await redis.multi().del(sessionKey(id)).srem(slots, id).zrem(due, id).exec()
+          await redis.multi().del(sessionKey(id)).hdel(reservedBytes,id).srem(slots, id).zrem(due, id).exec()
         })
       } catch { /* another replica owns the lock or cleanup failed; retry next pass */ }
     }

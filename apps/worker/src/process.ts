@@ -86,17 +86,6 @@ export async function runConverter(config: WorkerConfig, dir: string, input: str
   if (format === 'STL') await run(config, dir, [config.python, '-I', join(config.scriptsDir, 'validate-stl.py'), input], signal, config.memoryMb)
   else await run(config, dir, [config.python, '-I', join(config.scriptsDir, 'validate-input.py'), input, ext], signal, config.memoryMb)
   if (format === 'GLB') { await readGlbInfo(input, config.maxOutputBytes); return input }
-  if (format === 'STL' && (await stat(input)).size >= 30 * 1024 * 1024) {
-    const handle=await open(input,'r')
-    try {
-      const header=Buffer.alloc(84)
-      const {bytesRead}=await handle.read(header,0,84,0)
-      if(bytesRead===84 && 84+50*header.readUInt32LE(80)===(await handle.stat()).size) {
-        await run(config,dir,[config.python,'-I',join(config.scriptsDir,'stream-stl-glb.py'),input,output],signal,config.memoryMb)
-        return output
-      }
-    } finally { await handle.close() }
-  }
   let native: string[] | null = null
   if (format === '3MF') native = ['threemf-to-glb.py']
   if (format === 'PLY' || (format === 'STL' && config.engine === 'native')) native = ['dense-mesh-to-glb.py', '--ext', ext]
@@ -121,12 +110,12 @@ export async function runConverter(config: WorkerConfig, dir: string, input: str
 
 export function optimizationArgs(level: Exclude<CompressionLevel, 'None'>, animated: boolean, input: string, output: string) {
   // Reuse ADVFX optimize flags; presets differ by texture size and optional static mesh simplification.
-  const textureSize = { Low: '2048', Medium: '1024', High: '512' }[level]
+  const textureSize = { Low: '2048', Medium: '2048', High: '1024' }[level]
   const simplify = level === 'High' && !animated
   return ['optimize', input, output, '--compress', 'meshopt', '--meshopt-level', 'medium',
     '--texture-compress', 'webp', '--texture-size', textureSize,
     '--flatten', 'false', '--join', 'false', '--instance', 'false', '--palette', 'false',
-    '--simplify', String(simplify), '--simplify-ratio', simplify ? '0.3' : '0.5',
+    '--simplify', String(simplify), '--simplify-ratio', simplify ? '0.8' : '1',
     '--simplify-error', '0.001', '--simplify-lock-border', 'true']
 }
 export async function optimizeGlb(config: WorkerConfig, dir: string, input: string, level: CompressionLevel, signal: AbortSignal) {

@@ -1,7 +1,8 @@
 import { Injectable, OnModuleDestroy, ServiceUnavailableException } from '@nestjs/common'
-import { S3Client, PutObjectCommand, HeadObjectCommand, DeleteObjectCommand, GetObjectCommand, CopyObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, HeadObjectCommand, DeleteObjectCommand, GetObjectCommand, CopyObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, ListPartsCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
+import { partBytes } from '../../../../packages/shared/src/upload'
 import type { ModelFormat } from '../../../../packages/shared/src/compatibility'
 
 export const UPLOAD_HEADERS = { 'Content-Type': 'application/octet-stream', 'If-None-Match': '*' }
@@ -39,6 +40,43 @@ export class StorageService implements OnModuleDestroy {
     const signed = new URL(url).searchParams.get('X-Amz-SignedHeaders')?.split(';') ?? []
     if (!['content-length', 'content-type', 'if-none-match'].every((h) => signed.includes(h))) throw new ServiceUnavailableException('Storage signing configuration is unsafe')
     return url
+  }
+  async beginMultipart(key:string) {
+    const {client,Bucket}=this.ready()
+    const result=await client.send(new CreateMultipartUploadCommand({Bucket,Key:key,ContentType:'application/octet-stream'}),{abortSignal:AbortSignal.timeout(15000)})
+    if(!result.UploadId)throw new ServiceUnavailableException('Storage did not create an upload session')
+    return result.UploadId
+  }
+  async signPart(key:string,uploadId:string,part:number,bytes:number,expiresIn:number){
+    const {client,Bucket}=this.ready()
+    const url=await getSignedUrl(client,new UploadPartCommand({Bucket,Key:key,UploadId:uploadId,PartNumber:part,ContentLength:bytes}),{expiresIn,signableHeaders:new Set(['content-length'])})
+    if(!new URL(url).searchParams.get('X-Amz-SignedHeaders')?.split(';').includes('content-length'))throw new ServiceUnavailableException('Multipart length signing unavailable')
+    return url
+  }
+  async completeMultipart(key:string,uploadId:string,size:number,partSize:number,partCount:number){
+    const {client,Bucket}=this.ready()
+    // Read authoritative part sizes/ETags from storage. No untrusted ETag list in the API.
+    const parts:{PartNumber:number;ETag:string}[]=[]
+    let marker:string|undefined
+    do{
+      const page=await client.send(new ListPartsCommand({Bucket,Key:key,UploadId:uploadId,PartNumberMarker:marker,MaxParts:1000}),{abortSignal:AbortSignal.timeout(8000)})
+      for(const part of page.Parts??[]){
+        const n=parts.length+1
+        if(n>partCount||part.PartNumber!==n||part.Size!==partBytes(size,partSize,n)||!part.ETag)throw new ServiceUnavailableException('Multipart upload incomplete or invalid')
+        parts.push({PartNumber:n,ETag:part.ETag})
+      }
+      if(!page.IsTruncated)break
+      const next=page.NextPartNumberMarker
+      if(!next||next===marker||parts.length>=partCount)throw new ServiceUnavailableException('Invalid multipart listing')
+      marker=next
+    }while(true)
+    if(parts.length!==partCount)throw new ServiceUnavailableException('Multipart upload incomplete')
+    await client.send(new CompleteMultipartUploadCommand({Bucket,Key:key,UploadId:uploadId,MultipartUpload:{Parts:parts}}),{abortSignal:AbortSignal.timeout(30000)})
+  }
+  async abortMultipart(key:string,uploadId:string){
+    const {client,Bucket}=this.ready()
+    try{await client.send(new AbortMultipartUploadCommand({Bucket,Key:key,UploadId:uploadId}),{abortSignal:AbortSignal.timeout(8000)})}
+    catch(error){if((error as {name?:string}).name!=='NoSuchUpload' && (error as {$metadata?:{httpStatusCode?:number}}).$metadata?.httpStatusCode!==404)throw error}
   }
   async head(key: string) {
     const { client, Bucket } = this.ready()

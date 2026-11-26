@@ -1,5 +1,5 @@
 import { Controller, Get } from '@nestjs/common'
-import { ACCEPTED_FORMATS, MAX_UPLOAD_BYTES, getSupportedOutputs, getCompressionLevels, getOutputWarning, getOutputGroups, FORMAT_USE } from '../../../packages/shared/src/compatibility'
+import { ACCEPTED_FORMATS, getSupportedOutputs, getCompressionLevels, getOutputWarning, getOutputGroups, FORMAT_USE } from '../../../packages/shared/src/compatibility'
 
 import { QueueService } from './conversion/queue.service'
 import { isWorkerRoute, COMPRESSION_LEVELS } from '../../../packages/shared/src/jobs'
@@ -11,7 +11,7 @@ export class FormatsController {
   async getFormats() {
     const { conversionAvailable } = await this.jobs.health()
     return {
-      maxUploadBytes: MAX_UPLOAD_BYTES,
+      maxUploadBytes: null, // no fixed application cap
       conversionAvailable,
       compressionLevels: [...COMPRESSION_LEVELS],
       customColorAvailable: false,
