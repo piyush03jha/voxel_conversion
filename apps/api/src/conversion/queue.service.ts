@@ -3,7 +3,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import Redis from 'ioredis'
 import { Queue } from 'bullmq'
 import type { ConversionJobData, ConversionJobResult } from '../../../../packages/shared/src/jobs'
-import { bundleInputKey } from '../../../../packages/shared/src/batch'
+import { bundleInputKey,packageOutputEntry } from '../../../../packages/shared/src/batch'
 import { SINGLE_PUT_THRESHOLD, multipartPlan, partBytes, PART_URL_BATCH } from '../../../../packages/shared/src/upload'
 import { getCompressionLevels } from '../../../../packages/shared/src/compatibility'
 import { QUEUE_NAME, WORKER_HEARTBEATS, isWorkerRoute } from '../../../../packages/shared/src/jobs'
@@ -154,8 +154,10 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     if(!raw||!token)throw new NotFoundException('Batch not found')
     const batch=JSON.parse(raw) as {hash:string;operation:'conversion'|'compression';expiresAt:number}
     if(!timingSafeEqual(Buffer.from(batch.hash,'hex'),Buffer.from(tokenHash(token),'hex'))||Date.now()>=batch.expiresAt)throw new NotFoundException('Batch not found')
-    const request=validateUpload(body)
-    if(request.purpose==='preview'||(batch.operation==='conversion'&&(request.compression!=='None'||request.inputFormat===request.outputFormat))||(batch.operation==='compression'&&(request.inputFormat!==request.outputFormat||request.compression==='None'||request.bundleEntry)))throw new BadRequestException('Batch operation and settings do not match')
+    if(!body||typeof body!=='object'||Array.isArray(body))throw new BadRequestException('Invalid package request')
+    const {reuseSource,...metadata}=body as Record<string,unknown>
+    const request=validateUpload(metadata)
+    if(request.purpose!=='preview'&&((batch.operation==='conversion'&&(request.compression!=='None'||request.inputFormat===request.outputFormat))||(batch.operation==='compression'&&(request.inputFormat!==request.outputFormat||request.compression==='None'))))throw new BadRequestException('Batch operation and settings do not match')
     const active=await redis.get(batchActive(id))
     if(active){
       await this.lock(active,async()=>{
@@ -165,12 +167,26 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
         await redis.eval(RELEASE_LOCK,1,batchActive(id),active)
       })
     }
-    return this.create(body,false,id)
+    if(reuseSource===undefined)return this.create(metadata,false,id)
+    if(!reuseSource||typeof reuseSource!=='object')throw new BadRequestException('Invalid reusable source')
+    const source=reuseSource as {id?:string;token?:string}
+    if(typeof source.id!=='string'||typeof source.token!=='string')throw new BadRequestException('Invalid reusable source')
+    const parent=await this.authorized(source.id,'Bearer '+source.token)
+    const previous=await queue.getJob(parent.id)
+    if(parent.batchId!==id||parent.cancelled||Date.now()+120000>=parent.expiresAt||parent.inputFormat!==request.inputFormat||parent.bundleEntry!==request.bundleEntry||parent.originalBytes!==request.originalBytes||!previous||await previous.getState()!=='completed')throw new ConflictException('Reusable source unavailable; start a fresh upload')
+    const object=await this.storage.head(parent.inputKey)
+    if(!object?.ETag||object.ETag!==previous.data.etag||object.ContentLength!==parent.originalBytes)throw new ConflictException('Stored source changed or expired')
+    const child=await this.create(metadata,true,id)
+    try{
+      const session=await this.authorized(child.id,'Bearer '+child.token)
+      await this.storage.copy(parent.inputKey,session.inputKey,object.ETag)
+      return {...child,reused:true}
+    }catch(error){await this.cancel(child.id,'Bearer '+child.token).catch(()=>undefined);throw error}
   }
   async create(body: unknown, internalCopy = false,batchId?:string) {
     if (!this.config.acceptJobs || !this.storage.configured) throw new ServiceUnavailableException('Job submission is disabled')
     const request = validateUpload(body)
-    if(request.bundleEntry&&!batchId)throw new BadRequestException('Dependency bundles require a batch session')
+    if(request.bundleEntry&&!batchId&&!internalCopy)throw new BadRequestException('Dependency bundles require a batch session')
     if (!isWorkerRoute(request.inputFormat, request.outputFormat) || request.color !== null) throw new BadRequestException('Unsupported conversion pair; custom color is paused')
     if (!this.config.queueTestMode && await this.workerCount() < 1) throw new ServiceUnavailableException('No conversion worker is available')
     const { redis } = this.ready()
@@ -182,9 +198,9 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const multipart = !internalCopy && request.originalBytes > SINGLE_PUT_THRESHOLD
     const uploadSeconds = multipart ? this.config.multipartSeconds : this.config.uploadSeconds
     const session: Session = {
-      ...request, id, hash: tokenHash(token), ...(batchId?{batchId,downloadName:((body as {filename:string}).filename.replace(/\.[^.]+$/,'').replace(/[^\p{L}\p{N} ._-]/gu,'_').slice(0,160)||'model')+'.'+request.outputFormat.toLowerCase()}:{}),
+      ...request, id, hash: tokenHash(token), ...(batchId?{batchId,downloadName:((body as {filename:string}).filename.replace(/\.[^.]+$/,'').replace(/[^\p{L}\p{N} ._-]/gu,'_').slice(0,160)||'model')+'.'+(request.purpose==='preview'?'glb':request.packageOutput?'zip':request.outputFormat.toLowerCase())}:{}),
       inputKey: bundleInputKey(id,request.inputFormat,request.bundleEntry),
-      outputKey: jobOutputKey(id, request.inputFormat, request.outputFormat, request.purpose),
+      outputKey: jobOutputKey(id, request.inputFormat, request.outputFormat, request.purpose,request.packageOutput),
       uploadUntil: now + uploadSeconds * 1000,
       expiresAt: now + this.config.retentionSeconds * 1000,
     }
@@ -235,7 +251,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       const existing = await queue.getJob(id)
       if (existing) return { id, status: await existing.getState() }
       if (!this.config.acceptJobs) throw new ServiceUnavailableException('Job submission is disabled')
-      if (!isWorkerRoute(s.inputFormat, s.outputFormat) || !getCompressionLevels(s.outputFormat).includes(s.compression) || s.color !== null) throw new BadRequestException('Conversion route not enabled')
+      if (!isWorkerRoute(s.inputFormat, s.outputFormat) || (!s.bundleEntry&&!getCompressionLevels(s.outputFormat).includes(s.compression)) || s.color !== null) throw new BadRequestException('Conversion route not enabled')
       if (!this.config.queueTestMode && await this.workerCount() < 1) throw new ServiceUnavailableException('No conversion worker is available')
       if (Date.now() >= s.uploadUntil) throw new ConflictException('Upload session expired')
       let object = await this.storage.head(s.inputKey)
@@ -252,7 +268,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       // Extend cleanup deadline before publishing; retry with the same job id is idempotent.
       await redis.zadd(due, s.expiresAt, id)
       try { await queue.add('convert', {
-        purpose: s.purpose ?? 'conversion', ...(s.bundleEntry?{bundleEntry:s.bundleEntry}:{}), inputKey: s.inputKey, outputKey: s.outputKey, inputFormat: s.inputFormat, outputFormat: s.outputFormat,
+        purpose: s.purpose ?? 'conversion', ...(s.bundleEntry?{bundleEntry:s.bundleEntry}:{}), ...(s.packageOutput?{packageOutput:true}:{}), inputKey: s.inputKey, outputKey: s.outputKey, inputFormat: s.inputFormat, outputFormat: s.outputFormat,
         originalBytes: s.originalBytes, compression: s.compression, color: s.color,
         etag: object.ETag, expiresAt: s.expiresAt,
       }, { jobId: id, ...(s.purpose === 'preview' ? { priority: 10 } : {}) }) } catch (error) {
@@ -329,7 +345,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const object = await this.storage.head(parent.outputKey)
     if (!object?.ContentLength || !object.ETag) throw new NotFoundException('Output unavailable')
     // The child has its own slot, token, keys and retention. Copy in storage, never buffer bytes in the API.
-    const child = await this.create({ filename: 'output.' + parent.outputFormat.toLowerCase(), size: object.ContentLength, outputFormat: 'GLB', compression: 'None', purpose: 'preview' }, true)
+    const child = await this.create({ filename: 'output.' + parent.outputFormat.toLowerCase(), size: object.ContentLength, outputFormat: 'GLB', compression: 'None', purpose: 'preview', ...(parent.packageOutput?{bundleEntry:packageOutputEntry(parent.outputFormat,parent.compression,parent.bundleEntry)}:{}) }, true)
     try {
       const session = await this.authorized(child.id, 'Bearer ' + child.token)
       await this.storage.copy(parent.outputKey, session.inputKey, object.ETag)
@@ -349,7 +365,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const output = await this.storage.head(s.outputKey)
     if (!output || !output.ContentLength) throw new NotFoundException('Output unavailable')
     if (s.purpose === 'preview' && output.ContentLength > PREVIEW_MAX_BYTES) throw new ConflictException('Preview exceeds size limit')
-    const format = s.purpose === 'preview' ? previewKind(s.inputFormat) : s.outputFormat
+    const format = s.purpose === 'preview' ? previewKind(s.inputFormat) : s.packageOutput?'ZIP':s.outputFormat
     const seconds = Math.min(this.config.downloadSeconds, Math.floor((s.expiresAt - Date.now()) / 1000))
     if (seconds < 1) throw new ConflictException('Job expired')
     const filename=s.downloadName??((s.purpose === 'preview' ? 'preview.' : 'converted.') + format.toLowerCase())

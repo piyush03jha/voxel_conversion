@@ -16,6 +16,7 @@ parser.add_argument("--input", required=True)
 parser.add_argument("--output", required=True)
 parser.add_argument("--ext", required=True)
 parser.add_argument("--target", default="GLB")
+parser.add_argument("--package-output", action="store_true")
 parser.add_argument("--compression", default="None")
 parser.add_argument("--candidate")
 parser.add_argument("--preview", action="store_true")
@@ -512,7 +513,7 @@ try:
     else:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from export_handlers import export_scene, compress_scene
-        export_scene(args.target, args.output, "None")
+        export_scene(args.target, args.output, "None", args.package_output)
         if args.candidate and args.compression != "None":
             try:
                 if args.target == "3MF" or compress_scene(args.compression):

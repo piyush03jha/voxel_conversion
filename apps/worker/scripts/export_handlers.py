@@ -96,13 +96,13 @@ def export_3mf(path, level):
                 write(f'<item objectid="{oid}"/>')
             write('</build></model>')
 
-def export_scene(target, path, level):
+def export_scene(target, path, level, package_output=False):
     if target == "STL":
         need_mesh()
         checked(bpy.ops.wm.stl_export, filepath=path, ascii_format=False, export_selected_objects=False, apply_modifiers=True)
     elif target == "OBJ":
         need_mesh()
-        checked(bpy.ops.wm.obj_export, filepath=path, export_materials=False, export_uv=True, export_normals=True, apply_modifiers=True, export_colors=True)
+        checked(bpy.ops.wm.obj_export, filepath=path, export_materials=package_output, path_mode='COPY' if package_output else 'AUTO', export_pbr_extensions=package_output, export_uv=True, export_normals=True, apply_modifiers=True, export_colors=True)
     elif target == "PLY":
         need_mesh()
         checked(bpy.ops.wm.ply_export, filepath=path, ascii_format=False, export_selected_objects=False, apply_modifiers=True)
@@ -110,7 +110,7 @@ def export_scene(target, path, level):
         checked(bpy.ops.export_scene.fbx, filepath=path, path_mode="COPY", embed_textures=True, bake_anim=True)
     elif target in ("USD", "USDA", "USDC", "USDZ"):
         # Single file: omit material graphs that would refer to external textures.
-        checked(bpy.ops.wm.usd_export, filepath=path, export_animation=True, export_materials=False, export_textures=False, export_custom_properties=False)
+        checked(bpy.ops.wm.usd_export, filepath=path, export_animation=True, export_materials=package_output or target=='USDZ', export_textures=package_output or target=='USDZ', export_textures_mode='NEW', relative_paths=True, export_custom_properties=False)
     elif target == "ABC":
         start, end = bpy.context.scene.frame_start, bpy.context.scene.frame_end
         if end - start > 1000:

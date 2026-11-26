@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
-import { stat, rm } from 'node:fs/promises'
+import { mkdir, stat, rm } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import type { WorkerConfig } from './config'
 import { getOutputWarning } from '../../../packages/shared/src/compatibility'
@@ -217,12 +217,12 @@ export async function convertJob(config: WorkerConfig, dir: string, input: strin
     warning: [warning, level !== 'None' ? 'Compression unavailable or not smaller; original export retained.' : null].filter(Boolean).join(' ') || null }
 }
 
-export async function createPreview(config: WorkerConfig, dir: string, input: string, source: ModelFormat, signal: AbortSignal) {
+export async function createPreview(config: WorkerConfig, dir: string, input: string, source: ModelFormat, signal: AbortSignal,bundled=false) {
   const kind=previewKind(source), output=join(dir,'preview.'+kind.toLowerCase()), ext='.'+source.toLowerCase()
   const deadline=AbortSignal.any([signal,AbortSignal.timeout(120000)])
   const boundedConfig={...config,maxOutputBytes:PREVIEW_MAX_BYTES}
   if(source==='STL')await run(config,dir,[config.python,'-I',join(config.scriptsDir,'validate-stl.py'),input],deadline,config.memoryMb)
-  else await run(config,dir,[config.python,'-I',join(config.scriptsDir,'validate-input.py'),input,ext],deadline,config.memoryMb)
+  else if(!bundled) await run(config,dir,[config.python,'-I',join(config.scriptsDir,'validate-input.py'),input,ext],deadline,config.memoryMb)
   if(source==='PDF')await run(boundedConfig,dir,['pdftocairo','-f','1','-l','1','-singlefile','-scale-to','1200','-png',input,join(dir,'preview')],deadline,config.memoryMb)
   else if(source==='SVG')await run(boundedConfig,dir,['rsvg-convert','-w','1200','-h','1200','--keep-aspect-ratio','-o',output,input],deadline,config.memoryMb)
   else await run(boundedConfig,dir,[config.blender,'--background','--factory-startup','--disable-autoexec','--threads',String(config.threads),'--python-exit-code','1','--python',join(config.scriptsDir,'blender-convert.py'),'--','--input',input,'--output',output,'--ext',ext,'--preview'],deadline,config.blenderAddressMb)
@@ -245,4 +245,25 @@ export async function unpackBundle(config:WorkerConfig,dir:string,archive:string
   const root=join(dir,'assets')
   await run(config,dir,[config.python,'-I',join(config.scriptsDir,'extract-bundle.py'),archive,root,entry],signal,config.memoryMb)
   return join(root,entry)
+}
+
+export async function compressPackage(config:WorkerConfig,dir:string,uploaded:string,entry:string,level:Exclude<CompressionLevel,'None'>,signal:AbortSignal){
+  const output=join(dir,'compressed.zip'),original=(await stat(uploaded)).size
+  if(original>config.maxOutputBytes)throw new Error('INVALID_OUTPUT')
+  await run(config,dir,[config.python,'-I',join(config.scriptsDir,'package-output.py'),'repack',uploaded,output,entry,String({Low:1,Medium:6,High:9}[level])],signal,config.memoryMb)
+  const bytes=(await stat(output)).size
+  return bytes<original?{path:output,outputBytes:bytes,convertedBytes:original,compressionApplied:true,warning:'Lossless package compression; model, material and texture bytes preserved.'}:{path:uploaded,outputBytes:original,convertedBytes:original,compressionApplied:false,warning:'Original package retained; lossless compression did not reduce size.'}
+}
+export async function exportPackage(config:WorkerConfig,dir:string,input:string,source:ModelFormat,target:ModelFormat,signal:AbortSignal,bundled:boolean){
+  const root=join(dir,'export'),model=join(root,'model.'+target.toLowerCase()),output=join(dir,'output.zip')
+  await mkdir(root)
+  const ext='.'+source.toLowerCase()
+  if(source==='STL')await run(config,dir,[config.python,'-I',join(config.scriptsDir,'validate-stl.py'),input],signal,config.memoryMb)
+  else if(!bundled)await run(config,dir,[config.python,'-I',join(config.scriptsDir,'validate-input.py'),input,ext],signal,config.memoryMb)
+  await run(config,dir,[config.blender,'--background','--factory-startup','--disable-autoexec','--threads',String(config.threads),'--python-exit-code','1','--python',join(config.scriptsDir,'blender-convert.py'),'--','--input',input,'--output',model,'--ext',ext,'--target',target,'--package-output'],signal,config.blenderAddressMb)
+  await verifyOther(config,dir,model,target,signal)
+  await run(config,dir,[config.python,'-I',join(config.scriptsDir,'package-output.py'),'pack',root,output,'model.'+target.toLowerCase(),String(config.maxOutputBytes)],signal,config.memoryMb)
+  const bytes=(await stat(output)).size
+  if(bytes<1||bytes>config.maxOutputBytes)throw new Error('INVALID_OUTPUT')
+  return {path:output,outputBytes:bytes,convertedBytes:bytes,compressionApplied:false,warning:'ZIP includes the exported model and compatible material/texture assets; format-specific shader and animation limitations remain.'}
 }
