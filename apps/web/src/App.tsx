@@ -10,7 +10,8 @@ import {
 import { browserRoute } from './features/converter/browser-route'
 import { health } from './features/converter/conversion-client'
 import { useConversion } from './features/converter/use-conversion'
-import BatchWorkspace from './features/batch/BatchWorkspace'
+import BatchWorkspace, {dropped} from './features/batch/BatchWorkspace'
+import type {Asset} from './features/batch/zip'
 import ModelPreview from './features/converter/ModelPreview'
 import './App.css'
 
@@ -23,7 +24,7 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function SingleWorkspace() {
+function SingleWorkspace({onPackage}:{onPackage:(assets:Promise<Asset[]>,compress:boolean)=>void}) {
   const compressPage = window.location.pathname.replace(/\/$/, '') === '/compress'
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
@@ -146,17 +147,24 @@ function SingleWorkspace() {
             onDrop={(event) => {
               event.preventDefault()
               setIsDragging(false)
-              selectFile(event.dataTransfer.files[0])
+              if(locked)return
+              const files=Array.from(event.dataTransfer.files)
+              const entries=Array.from(event.dataTransfer.items).filter(i=>i.kind==='file').map(i=>i.webkitGetAsEntry?.())
+              if(files.length!==1||entries.some(e=>e?.isDirectory)||files.some(f=>/\.zip$/i.test(f.name))){onPackage(dropped(event),compressPage);return}
+              selectFile(files[0])
             }}>
             <input
               ref={fileInputRef}
               className="visually-hidden"
               type="file"
+              multiple
               disabled={job.busy || job.canResume || downloading}
-              accept={ACCEPTED_FORMATS.map((format) => `.${format.toLowerCase()}`).join(',')}
+              accept={[...ACCEPTED_FORMATS.map((format) => `.${format.toLowerCase()}`),'.zip','.mtl','.bin','image/*'].join(',')}
               onChange={(event) => {
-                selectFile(event.currentTarget.files?.[0])
+                const files=Array.from(event.currentTarget.files??[])
                 event.currentTarget.value = ''
+                if(files.length>1||files.some(f=>/\.zip$/i.test(f.name))){onPackage(Promise.resolve(files.map(file=>({path:file.webkitRelativePath||file.name,file}))),compressPage);return}
+                selectFile(files[0])
               }}
               aria-label="Choose a 3D model file"
             />
@@ -287,7 +295,15 @@ function SingleWorkspace() {
 }
 
 export default function App(){
-  const path=window.location.pathname.replace(/\/$/,'')
-  if(['/batch','/compress/batch','/package','/compress/package'].includes(path))return <BatchWorkspace compress={path.startsWith('/compress')} singlePackage={path.endsWith('/package')}/>
-  return <SingleWorkspace/>
+  const [path,setPath]=useState(window.location.pathname.replace(/\/$/,''))
+  const [initialAssets,setInitialAssets]=useState<Promise<Asset[]>|undefined>()
+  useEffect(()=>{const pop=()=>{setInitialAssets(undefined);setPath(window.location.pathname.replace(/\/$/,''))};window.addEventListener('popstate',pop);return()=>window.removeEventListener('popstate',pop)},[])
+  function openPackage(assets:Promise<Asset[]>,compress:boolean){
+    // Attach a rejection handler immediately while React mounts the workspace.
+    void assets.catch(()=>undefined)
+    const next=compress?'/compress/package':'/package'
+    window.history.pushState(null,'',next);setInitialAssets(assets);setPath(next)
+  }
+  if(['/batch','/compress/batch','/package','/compress/package'].includes(path))return <BatchWorkspace key={path} compress={path.startsWith('/compress')} singlePackage={path.endsWith('/package')} initialAssets={initialAssets}/>
+  return <SingleWorkspace key={path} onPackage={openPackage}/>
 }

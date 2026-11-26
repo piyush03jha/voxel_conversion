@@ -2,7 +2,7 @@ import { getFormatFromFilename } from '../converter/compatibility'
 import type { ModelFormat } from '../converter/compatibility'
 import { BATCH_MAX_MODELS,safeBatchPath,supportsPackage } from '../../../../../packages/shared/src/batch'
 import type { Asset } from './zip'
-export type Model={asset:Asset;format:ModelFormat;dependencies:Asset[];error?:string;warning?:string;manual?:boolean}
+export type Model={asset:Asset;format:ModelFormat;dependencies:Asset[];error?:string;warning?:string;manual?:boolean;folderAttached?:boolean;needsAttachment?:boolean}
 export const images=/\.(png|jpe?g|webp|tga|bmp|tiff?|exr|hdr|ktx2|dds)$/i
 function resolve(parent:string,reference:string,uri=false){
   const ref=uri?decodeURIComponent(reference):reference
@@ -40,7 +40,7 @@ export function attachFolder(root:Model,assets:Asset[]):Model{
   const folder=root.asset.path.includes('/')?root.asset.path.split('/')[0]:parent(root.asset.path)
   const known=new Map(root.dependencies.map(a=>[a.path,a]))
   for(const a of assets)if(a.path!==root.asset.path&&inFolder(a.path,folder)&&(images.test(a.path)||/\.(mtl|bin)$/i.test(a.path)||(['USD','USDA','USDC'].includes(root.format)&&usdLayer.test(a.path))))known.set(a.path,a)
-  return {...root,dependencies:[...known.values()],manual:true,warning:'Folder assets included by selection; opaque importer references may still require relinking.'}
+  return {...root,dependencies:[...known.values()],manual:true,folderAttached:true,needsAttachment:false,warning:'Folder assets included by selection; opaque importer references may still require relinking.'}
 }
 async function gltfDocument(asset:Asset,format:ModelFormat){
   if(format==='GLTF'){
@@ -114,6 +114,6 @@ export async function discover(assets:Asset[],signal:AbortSignal){
     if(!m.manual)return m
     const top=m.asset.path.includes('/')?m.asset.path.split('/')[0]:''
     const siblings=roots.filter(r=>inFolder(r.asset.path,top))
-    return siblings.length===1?attachFolder(m,assets):m
+    return siblings.length===1?attachFolder(m,assets):{...m,needsAttachment:assets.some(a=>inFolder(a.path,top)&&(images.test(a.path)||/\.(bin|mtl)$/i.test(a.path)||(['USD','USDA','USDC'].includes(m.format)&&usdLayer.test(a.path)&&a.path!==m.asset.path)))}
   })
 }

@@ -23,4 +23,23 @@ class BundleTests(unittest.TestCase):
                     for name,data in files.items():z.writestr(name,data)
                 result=subprocess.run([sys.executable,"-I",str(SCRIPT),str(archive),str(root/"out"),entry],capture_output=True,timeout=30)
                 self.assertEqual(result.returncode==0,ok,result.stderr)
+    def test_package_output(self):
+        pack=SCRIPT.with_name("package-output.py")
+        with tempfile.TemporaryDirectory() as folder:
+            root=pathlib.Path(folder);model=root/"export";model.mkdir()
+            (model/"model.obj").write_text("mtllib a.mtl\n"+"v 0 0 0\n"*10000)
+            (model/"a.mtl").write_text("map_Kd texture.png")
+            (model/"texture.png").write_bytes(b"texture")
+            archive=root/"export.zip";compressed=root/"compressed.zip"
+            def run(*args):
+                return subprocess.run([sys.executable,"-I",str(pack),*map(str,args)],capture_output=True,timeout=30)
+            self.assertEqual(run("pack",model,archive,"model.obj",1024**2).returncode,0)
+            self.assertEqual(run("repack",archive,compressed,"model.obj",9).returncode,0)
+            self.assertLess(compressed.stat().st_size,archive.stat().st_size)
+            with zipfile.ZipFile(archive) as a,zipfile.ZipFile(compressed) as b:
+                self.assertEqual(a.namelist(),b.namelist())
+                for name in a.namelist():self.assertEqual(a.read(name),b.read(name))
+            self.assertEqual(subprocess.run([sys.executable,"-I",str(SCRIPT),str(compressed),str(root/"reopened"),"model.obj"],capture_output=True,timeout=30).returncode,0)
+            (model/"texture.png").unlink()
+            self.assertNotEqual(run("pack",model,root/"bad.zip","model.obj",1024**2).returncode,0)
 if __name__=="__main__":unittest.main()

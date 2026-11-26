@@ -1,5 +1,7 @@
 # Batch processing
 
+Update: [Model packages](model-packages.md) supersedes the OBJ/glTF-only dependency and package compression limitations below. Worker heartbeat v7.
+
 The converter remains independent of ADVFX. Batch conversion (/batch) and batch compression (/compress/batch) reuse the existing single-model engines, multipart uploads, private temporary storage, and Redis queue. API validation and the worker contract reject mixed conversion + compression requests. Conversion always uses None; compression keeps the input format. Old combined-job API clients must be updated. Stop old workers/API and drain or cancel older incompatible jobs before restarting (heartbeat v6).
 
 ## Workflow

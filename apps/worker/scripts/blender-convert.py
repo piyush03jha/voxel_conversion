@@ -429,6 +429,8 @@ try:
         # glTF exporter below converts Blender Z-up to glTF Y-up. Do not add an
         # unconditional 90-degree rotation: it breaks valid Z-up USD assets
         # and models whose authored pose is already correct.
+        if args.package_root:
+            verify_usd_dependencies(input_path,args.package_root)
         try:
             from pxr import Usd, UsdGeom
 
@@ -441,8 +443,6 @@ try:
         except Exception as exc:
             print("WARNING: USD up-axis metadata unavailable:", str(exc))
 
-        if args.package_root:
-            verify_usd_dependencies(input_path,args.package_root)
         bpy.ops.wm.usd_import(filepath=input_path)
     elif ext == ".abc":
         # Run synchronously: in a headless run a background import job can

@@ -22,7 +22,7 @@ function fileName(file:File){return file.name.replace(/[\\/:*?"<>|\u0000-\u001f]
 function resultName(row:Row){return row.result?.name??outputName(fileName(row.model.asset.file),row.target)}
 function zipName(row:Row){return String(row.id+1).padStart(3,'0')+'-'+resultName(row)}
 function defaultTarget(model:Model,common:ModelFormat){return common!==model.format&&isConversionSupported(model.format,common)?common:getOutputGroups(model.format).recommended[0]??'GLB'}
-async function dropped(event:DragEvent):Promise<Asset[]>{
+export async function dropped(event:DragEvent):Promise<Asset[]>{
   // Capture all entries synchronously before the drag event is released.
   const items=Array.from(event.dataTransfer.items),entries=items.filter(i=>i.kind==='file').map(i=>i.webkitGetAsEntry?.()).filter((e):e is FileSystemEntry=>!!e)
   const fallback=Array.from(event.dataTransfer.files).map(file=>({path:file.webkitRelativePath||file.name,file}))
@@ -37,7 +37,7 @@ async function dropped(event:DragEvent):Promise<Asset[]>{
   return out
 }
 
-export default function BatchWorkspace({compress,singlePackage=false}:{compress:boolean;singlePackage?:boolean}){
+export default function BatchWorkspace({compress,singlePackage=false,initialAssets}:{compress:boolean;singlePackage?:boolean;initialAssets?:Promise<Asset[]>}){
   const assetsRef=useRef<Asset[]>([])
   const [rows,setRows]=useState<Row[]>([]),rowsRef=useRef<Row[]>([])
   const [common,setCommon]=useState<ModelFormat>('GLB'),[level,setLevel]=useState<CompressionLevel>('Medium')
@@ -80,9 +80,17 @@ export default function BatchWorkspace({compress,singlePackage=false}:{compress:
     }catch(e){await fresh.close();if(!controller.signal.aborted)setError(e instanceof Error?e.message:'File scan failed')}
     finally{if(active.current===controller)active.current=null;if(alive.current)setScanning(false)}
   }
+  useEffect(()=>{
+    if(!initialAssets)return
+    let disposed=false
+    void initialAssets.then(assets=>{if(!disposed)void scan(async()=>assets)},e=>{if(!disposed)setError(e instanceof Error?e.message:'Folder selection failed')})
+    return()=>{disposed=true}
+    // Initial drag selection is consumed only once per mounted package workspace.
+  },[initialAssets])
   function pick(event:ChangeEvent<HTMLInputElement>){const assets=Array.from(event.currentTarget.files??[]).map(file=>({path:file.webkitRelativePath||file.name,file}));event.currentTarget.value='';if(assets.length)void scan(async()=>assets)}
   function reason(row:Row){
     if(row.model.error)return row.model.error
+    if(row.model.needsAttachment)return 'Choose this main model and attach its supporting folder assets before processing.'
     if(!row.model.asset.file.size)return 'Empty model'
     if(compress){if((!row.model.dependencies.length&&!getCompressionLevels(row.model.format).includes(level))||level==='None')return 'Compression is unavailable for '+row.model.format}
     else if(row.target===row.model.format||!isConversionSupported(row.model.format,row.target))return 'Selected conversion is not supported'
@@ -197,13 +205,13 @@ export default function BatchWorkspace({compress,singlePackage=false}:{compress:
           const blob=await api.fetchPreview(session,job.outputBytes,signal)
           patch(row.id,{previewFile:new File([blob],'package-preview.glb'),sourceSession:session,previewPending:undefined,previewUploaded:undefined})
           setMessage('Package preview ready. Conversion can reuse the uploaded source.');return
-        }else if(['failed','expired','cancelled'].includes(job.status)){patch(row.id,{previewPending:undefined});throw new Error(job.error??'Package preview '+job.status)}
+        }else if(['failed','expired','cancelled'].includes(job.status)){patch(row.id,{previewPending:undefined,previewUploaded:undefined});throw new Error(job.error??'Package preview '+job.status)}
         setMessage(job.status==='active'?'Generating package preview…':'Package preview waiting for worker…')
         await api.wait(2500,signal)
       }
-      patch(row.id,{previewPending:undefined});throw new Error('Preview expired')
+      patch(row.id,{previewPending:undefined,previewUploaded:undefined});throw new Error('Preview expired')
     }catch(e){
-      if(session&&!uploaded){try{await api.cancel(session);patch(row.id,{previewPending:undefined})}catch{/* keep token for reconciliation */}}
+      if(session&&!uploaded){try{await api.cancel(session);patch(row.id,{previewPending:undefined,previewUploaded:undefined})}catch{/* keep token for reconciliation */}}
       setError(e instanceof Error?e.message:'Package preview unavailable')
     }finally{if(active.current===controller)active.current=null;if(alive.current)setWorking(false)}
   }
@@ -291,7 +299,7 @@ export default function BatchWorkspace({compress,singlePackage=false}:{compress:
             <div className="batch-row-actions">{row.result?<button className="job-action download-action" type="button" onClick={()=>void downloadOne(row)}>Download</button>:<button className="job-action" type="button" disabled={locked||!row.include||!!reason(row)&&!row.pending||pending&&!row.pending} onClick={()=>void run(row.id)}>{row.pending?'Resume':row.state==='failed'?'Retry':'Process'}</button>}</div>
           </article>)}
         </div>
-        <aside className="batch-preview"><div className="preview-heading"><h2>Model preview</h2></div><p className="format-footnote">{chosen?.model.dependencies.length?'Package preview includes the related files in its import. Preview shows static geometry only.':''}</p>{chosen&&chosen.include&&chosen.model.dependencies.length>0&&!chosen.previewFile&&<button className="job-action" type="button" disabled={locked||!serverReady||!!chosen.model.error||rows.some(r=>r.pending||r.previewPending&&r.id!==chosen.id)} onClick={()=>void previewPackage(chosen)}>{chosen.previewPending?'Resume package preview':'Generate package preview'}</button>}<div className="preview-window"><ModelPreview key={String(chosen?.id??-1)+':'+(chosen?.previewFile?'package':'source')} file={chosen?.model.dependencies.length?chosen.previewFile??null:chosen?.model.asset.file??null} result={chosen?.result??null} busy={working||packing} serverReady={serverReady}/></div></aside>
+        <aside className="batch-preview"><div className="preview-heading"><h2>Model preview</h2></div><p className="format-footnote">{chosen?.model.dependencies.length?'Package preview includes the related files in its import. Preview shows static geometry only.':''}</p>{chosen&&chosen.include&&chosen.model.dependencies.length>0&&!chosen.previewFile&&<button className="job-action" type="button" disabled={locked||!serverReady||!!chosen.model.error||!!chosen.model.needsAttachment||rows.some(r=>r.pending||r.previewPending&&r.id!==chosen.id)} onClick={()=>void previewPackage(chosen)}>{chosen.previewPending?'Resume package preview':'Generate package preview'}</button>}<div className="preview-window"><ModelPreview key={String(chosen?.id??-1)+':'+(chosen?.previewFile?'package':'source')} file={chosen?.model.dependencies.length?chosen.previewFile??null:chosen?.model.asset.file??null} result={chosen?.result??null} busy={working||packing} serverReady={serverReady}/></div></aside>
       </section>
       <p className="privacy-note">One server job per batch. Individual results are available as soon as they finish. Keep this tab open and finish downloads before clearing the batch; server files and download links expire. ZIP downloads use browser temporary disk where available.</p>
     </>}
