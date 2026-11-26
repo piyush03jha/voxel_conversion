@@ -54,13 +54,16 @@ async function directory(blob:Blob):Promise<Entry[]>{
 export class Scratch {
   private dir?:FileSystemDirectoryHandle
   private root?:FileSystemDirectoryHandle
-  private name='formshift-batch-'+crypto.randomUUID()
+  private name='formshift-batch-'+Date.now()+'-'+crypto.randomUUID()
   private count=0
   private memory=0
   async save(stream:ReadableStream<Uint8Array>,name:string,expected:number,signal:AbortSignal,crc?:number):Promise<File>{
     if(!Number.isSafeInteger(expected)||expected<0)throw new Error('Invalid file length')
     if(!this.dir&&navigator.storage?.getDirectory){
       this.root=await navigator.storage.getDirectory()
+      // Recover disk space from abandoned tabs after the job retention window.
+      const root=this.root as FileSystemDirectoryHandle & {values?:()=>AsyncIterable<FileSystemHandle>}
+      if(root.values)for await(const item of root.values()){const match=/^formshift-batch-(\d+)-/.exec(item.name);if(item.kind==='directory'&&match&&Date.now()-Number(match[1])>48*3600000)await root.removeEntry(item.name,{recursive:true}).catch(()=>undefined)}
       this.dir=await this.root.getDirectoryHandle(this.name,{create:true})
     }
     const handle=this.dir?await this.dir.getFileHandle(String(++this.count),{create:true}):undefined

@@ -10,6 +10,7 @@ import {
 import { browserRoute } from './features/converter/browser-route'
 import { health } from './features/converter/conversion-client'
 import { useConversion } from './features/converter/use-conversion'
+import BatchWorkspace from './features/batch/BatchWorkspace'
 import ModelPreview from './features/converter/ModelPreview'
 import './App.css'
 
@@ -22,7 +23,7 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function App() {
+function SingleWorkspace() {
   const compressPage = window.location.pathname.replace(/\/$/, '') === '/compress'
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
@@ -107,6 +108,7 @@ function App() {
         <nav className="tool-nav" aria-label="Model tools">
           <a href="/" aria-current={!compressPage ? 'page' : undefined} aria-disabled={locked} onClick={event=>{if(locked)event.preventDefault()}}>Convert</a>
           <a href="/compress" aria-current={compressPage ? 'page' : undefined} aria-disabled={locked} onClick={event=>{if(locked)event.preventDefault()}}>Compress</a>
+          <a href={compressPage?'/compress/batch':'/batch'} aria-disabled={locked} onClick={event=>{if(locked)event.preventDefault()}}>Batch {compressPage?'compress':'convert'}</a>
         </nav>
         <div className="topbar-right">
           <span className="service-indicator"><i /> {serverReady ? 'Server ready' : apiOnline ? 'Server conversion offline' : 'Browser mode'}</span>
@@ -283,4 +285,8 @@ function App() {
   )
 }
 
-export default App
+export default function App(){
+  const path=window.location.pathname.replace(/\/$/,'')
+  if(path==='/batch'||path==='/compress/batch')return <BatchWorkspace compress={path==='/compress/batch'}/>
+  return <SingleWorkspace/>
+}
