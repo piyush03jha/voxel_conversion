@@ -3,7 +3,7 @@ import type { CompressionLevel, ModelFormat } from './compatibility'
 export const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
 export type Health = { status: string; conversionAvailable: boolean }
 export type JobSession = { id: string; token: string; expiresAt: number }
-export type Session = JobSession & { uploadUrl: string; uploadHeaders: Record<string,string> }
+export type Session = JobSession & { uploadExpiresAt?: number; uploadUrl: string; uploadHeaders: Record<string,string> }
 export type JobStatus = { status: string; previewKind?: 'GLB' | 'PNG' | null; position?: number | null; etaSeconds?: number | null; progress?: number | null; originalBytes?: number; convertedBytes?: number | null; outputBytes?: number | null; reductionPercent?: number | null; compressionReductionPercent?: number | null; warning?: string | null; error?: string | null }
 
 async function request<T>(path: string, options: RequestInit = {}, timeoutMs = 20000): Promise<T> {
@@ -31,7 +31,7 @@ export function upload(session:Session,file:File,signal:AbortSignal,progress:(pe
     const abort=()=>xhr.abort()
     const clean=()=>signal.removeEventListener('abort',abort)
     xhr.open('PUT',session.uploadUrl)
-    xhr.timeout=15*60*1000
+    xhr.timeout=Math.max(1000, Math.min(30*60*1000,(session.uploadExpiresAt??Date.now()+15*60*1000)-Date.now()))
     for(const [name,value] of Object.entries(session.uploadHeaders)) if(name.toLowerCase()!=='content-length')xhr.setRequestHeader(name,value)
     xhr.upload.onprogress=event=>{if(event.lengthComputable)progress(Math.min(100,Math.round(event.loaded/event.total*100)))}
     xhr.onload=()=>{clean();if(xhr.status>=200&&xhr.status<300)resolve();else reject(new Error('Storage upload rejected ('+xhr.status+'). Check the storage/CORS configuration.'))}

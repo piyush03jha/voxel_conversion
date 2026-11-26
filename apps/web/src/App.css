@@ -169,3 +169,28 @@
 .preview-tools button:disabled { opacity: .5; cursor: not-allowed; }
 .preview-tools small { color: #a8b9b0; }
 .document-preview { position: absolute; inset: 40px 24px 55px; width: calc(100% - 48px); height: calc(100% - 95px); object-fit: contain; background: #fff; }
+
+/* Larger persistent workspace and separate tool pages */
+.app-shell { width: min(1540px, calc(100% - 64px)); }
+.workspace { grid-template-columns: minmax(0,1fr) 300px; }
+.preview-window { height: clamp(490px, 66vh, 820px); }
+.preview-canvas { inset: 0 0 25px; }
+.tool-nav { display:flex; gap:8px; align-items:center; }
+.tool-nav a { color:#aab5b1; text-decoration:none; font-size:14px; padding:10px 18px; border-radius:5px; border:1px solid transparent; }
+.tool-nav a[aria-current="page"] { color:var(--accent); border-color:#40524a; background:#1b2925; }
+.tool-nav a[aria-disabled="true"], .tool-link[aria-disabled="true"] { opacity:.5; cursor:not-allowed; }
+.tool-link { color:var(--accent); }
+.recommended-formats { margin:16px 0; }
+.format-choices { display:grid; grid-template-columns:repeat(auto-fit,minmax(112px,1fr)); gap:7px; margin-top:9px; }
+.format-choices button { display:flex; flex-direction:column; gap:4px; text-align:left; min-width:0; border:1px solid #35443d; background:#172420; color:#e0ece5; padding:10px; border-radius:5px; cursor:pointer; }
+.format-choices button[aria-pressed="true"] { border-color:var(--accent); background:#243b32; color:var(--accent); }
+.format-choices button:disabled { opacity:.6; cursor:not-allowed; }
+.format-choices small { font-size:10px; color:#9aa9a2; }
+.recommended-formats details { margin-top:13px; }
+.recommended-formats summary { color:#aab9b2; font-size:12px; cursor:pointer; }
+.same-format-note { display:grid; gap:8px; margin:15px 0; padding:14px; border:1px solid #35443d; border-radius:5px; }
+.same-format-note strong { font-size:22px; color:var(--accent); }
+.same-format-note p { color:#aab9b2; font-size:12px; margin:0; }
+.preview-processing { position:absolute; z-index:4; top:42px; left:12px; padding:7px 10px; background:#172420e8; border:1px solid #40524a; color:var(--accent); border-radius:5px; font-size:11px; pointer-events:none; }
+@media(max-width:900px) { .app-shell{width:calc(100% - 40px)} .workspace{grid-template-columns:minmax(0,1fr)} .preview-window{height: min(65vh,610px);min-height:380px} }
+@media(max-width:560px) { .app-shell{width:calc(100% - 28px)} .topbar{height:auto;min-height:82px;flex-wrap:wrap;padding:12px 0;gap:9px} .tool-nav{order:3;width:100%} .tool-nav a{flex:1;text-align:center} .github-link{display:none} .preview-window{height:430px;min-height:0} .format-choices{grid-template-columns:repeat(2,minmax(0,1fr))} }

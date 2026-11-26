@@ -3,7 +3,8 @@ import {
   ACCEPTED_FORMATS,
   MAX_UPLOAD_BYTES,
   getFormatFromFilename,
-  getSupportedOutputs,
+  getOutputGroups,
+  FORMAT_USE,
   getCompressionLevels,
   getOutputWarning,
 } from './features/converter/compatibility'
@@ -22,6 +23,7 @@ function formatBytes(bytes: number) {
 }
 
 function App() {
+  const compressPage = window.location.pathname.replace(/\/$/, '') === '/compress'
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
   const [fileError, setFileError] = useState('')
@@ -51,18 +53,22 @@ function App() {
   }, [])
 
   const inputFormat = file ? getFormatFromFilename(file.name) : null
-  const outputs = inputFormat ? getSupportedOutputs(inputFormat) : []
-  const selectedOutput = outputs.find((format) => format === outputFormat) ?? outputs[0] ?? 'GLB'
+  const groups = inputFormat ? getOutputGroups(inputFormat) : { recommended: [], other: [] }
+  const outputs = [...groups.recommended, ...groups.other]
+  const selectedOutput = compressPage ? inputFormat ?? 'GLB' : outputs.find((format) => format === outputFormat) ?? outputs[0] ?? 'GLB'
+  const locked = job.busy || job.canResume || downloading
+  const selectedCompression = compressPage ? compression : 'None'
+  const compressible = !compressPage || (!!inputFormat && getCompressionLevels(inputFormat).length > 1 && compression !== 'None')
   const compressionLevels = getCompressionLevels(selectedOutput)
   const outputWarning = getOutputWarning(selectedOutput)
 
-  const local = !!file && !!inputFormat && browserRoute(inputFormat, selectedOutput, file.size, compression)
+  const local = !!file && !!inputFormat && browserRoute(inputFormat, selectedOutput, file.size, selectedCompression)
   const route = local ? 'browser' : 'server'
-  const ready = !!file && !job.busy && !job.canResume && !downloading && (local || serverReady)
+  const ready = !!file && !locked && compressible && (local || serverReady)
   const reduction = job.result ? (1 - job.result.bytes / job.result.originalBytes) * 100 : null
   function begin(forceServer = false) {
-    if (!file || !inputFormat || job.busy || job.canResume || downloading || (forceServer ? !serverReady : !ready)) return
-    void start(file, inputFormat, selectedOutput, compression, forceServer ? 'server' : route)
+    if (!file || !inputFormat || locked || !compressible || (forceServer ? !serverReady : !ready)) return
+    void start(file, inputFormat, selectedOutput, selectedCompression, forceServer ? 'server' : route)
   }
 
   function selectFile(candidate?: File) {
@@ -88,8 +94,8 @@ function App() {
     }
 
     setFile(candidate)
-    setOutputFormat(getSupportedOutputs(getFormatFromFilename(candidate.name)!)[0] ?? 'GLB')
-    setCompression('None')
+    setOutputFormat(getOutputGroups(getFormatFromFilename(candidate.name)!).recommended[0] ?? 'GLB')
+    setCompression(compressPage ? 'Medium' : 'None')
     setFileError('')
   }
 
@@ -104,6 +110,10 @@ function App() {
           </span>
           <span>formshift</span>
         </a>
+        <nav className="tool-nav" aria-label="Model tools">
+          <a href="/" aria-current={!compressPage ? 'page' : undefined} aria-disabled={locked} onClick={event=>{if(locked)event.preventDefault()}}>Convert</a>
+          <a href="/compress" aria-current={compressPage ? 'page' : undefined} aria-disabled={locked} onClick={event=>{if(locked)event.preventDefault()}}>Compress</a>
+        </nav>
         <div className="topbar-right">
           <span className="service-indicator"><i /> {serverReady ? 'Server ready' : apiOnline ? 'Server conversion offline' : 'Browser mode'}</span>
           <a className="github-link" href="https://github.com/piyush03jha/voxel_conversion" target="_blank" rel="noreferrer">
@@ -115,8 +125,8 @@ function App() {
       <section className="intro">
         <div className="intro-copy">
           <div className="eyebrow"><span>01</span> THE 3D FILE WORKSHOP</div>
-          <h1>Make your models<br /><span>work everywhere.</span></h1>
-          <p>Convert and compress 3D files in one clean workspace. Drop in a model to get started.</p>
+          <h1>{compressPage ? <>Make your models<br /><span>lighter.</span></> : <>Make your models<br /><span>work everywhere.</span></>}</h1>
+          <p>{compressPage ? 'Reduce model size without changing its file format. Choose a compression level.' : 'Convert your 3D model into a compatible format, with no optional compression applied.'}</p>
         </div>
         <div className="intro-note">
           <span className="note-icon" aria-hidden="true">✳</span>
@@ -124,7 +134,7 @@ function App() {
         </div>
       </section>
 
-      <section className="workspace" aria-label="3D file converter">
+      <section className="workspace" aria-label={compressPage ? "3D file compressor" : "3D file converter"}>
         <div className="workspace-main">
           <div className="section-heading">
             <div>
@@ -174,18 +184,23 @@ function App() {
           </div>
           {fileError && <p className="error-message" role="alert">{fileError}</p>}
 
-          <div className="format-row">
-            <div className="format-select">
-              <span className="field-label">FROM</span>
-              <div className="format-value">{inputFormat ?? '—'} <span>{inputFormat ? 'Input format detected' : 'Waiting for file'}</span></div>
+          {compressPage ? <div className="same-format-note"><span className="field-label">FILE FORMAT</span><strong>{inputFormat ?? '—'} → {inputFormat ?? '—'}</strong><p>{inputFormat && getCompressionLevels(inputFormat).length===1 ? 'Compression is unavailable for this format. Convert to GLB or another supported compression format first.' : 'Compression keeps the selected file format.'}</p></div> : <>
+            <div className="format-row">
+              <div className="format-select"><span className="field-label">FROM</span><div className="format-value">{inputFormat ?? '—'} <span>Detected format</span></div></div>
+              <span className="format-arrow" aria-hidden="true">→</span>
+              <div className="format-select output-format"><span className="field-label">TO</span><div className="format-value"><select aria-label="Output format" value={selectedOutput} disabled={!outputs.length || locked} onChange={event=>{setOutputFormat(event.target.value);reset()}}>
+                {!outputs.length && <option value="GLB">Select a file</option>}
+                <optgroup label="Recommended formats">{groups.recommended.map(format=><option key={format} value={format}>{format} — {FORMAT_USE[format]}</option>)}</optgroup>
+                <optgroup label="Other compatible formats">{groups.other.map(format=><option key={format} value={format}>{format}</option>)}</optgroup>
+              </select><span>Selected export</span></div></div>
             </div>
-            <span className="format-arrow" aria-hidden="true">→</span>
-            <div className="format-select output-format">
-              <span className="field-label">TO</span>
-              <div className="format-value"><select aria-label="Output format" value={selectedOutput} disabled={!outputs.length || job.busy || job.canResume || downloading} onChange={(event) => { setOutputFormat(event.target.value); setCompression('None'); reset() }}>{(outputs.length ? outputs : ['GLB']).map((format) => <option key={format} value={format}>{format}</option>)}</select><span>Selected export</span></div>
-            </div>
-          </div>
-          <p className="format-footnote">Choose a compatible output. {outputWarning ?? 'Format conversion may change materials or geometry.'}</p>
+            {inputFormat && <div className="recommended-formats">
+              <span className="field-label">RECOMMENDED FOR {inputFormat}</span>
+              <div className="format-choices">{groups.recommended.map(format=><button type="button" key={format} disabled={locked} aria-pressed={selectedOutput===format} onClick={()=>{setOutputFormat(format);reset()}}><strong>{format}</strong><small>{FORMAT_USE[format]}</small></button>)}</div>
+              <details open={groups.other.includes(selectedOutput)}><summary>Other compatible formats ({groups.other.length})</summary><div className="format-choices">{groups.other.map(format=><button type="button" key={format} disabled={locked} aria-pressed={selectedOutput===format} onClick={()=>{setOutputFormat(format);reset()}}><strong>{format}</strong><small>{FORMAT_USE[format]}</small></button>)}</div></details>
+            </div>}
+            <p className="format-footnote">{outputWarning ?? 'Format conversion may change materials or geometry.'}</p>
+          </>}
 
           <div className="preview-heading">
             <div>
@@ -196,7 +211,7 @@ function App() {
           </div>
           <div className="preview-window">
             <div className="preview-grid" aria-hidden="true" />
-            <ModelPreview key={(file ? file.name + ':' + file.size + ':' + file.lastModified : 'empty') + ':' + (job.busy ? 'busy' : job.result ? 'result' : 'input')} file={file} result={job.result} busy={job.busy} serverReady={serverReady} />
+            <ModelPreview key={file ? file.name + ':' + file.size + ':' + file.lastModified : 'empty'} file={file} result={job.result} busy={job.busy} serverReady={serverReady} />
           </div>
         </div>
 
@@ -204,22 +219,23 @@ function App() {
           <div className="settings-title">
             <div>
               <span className="step-number">03</span>
-              <h2>Fine-tune</h2>
+              <h2>{compressPage ? 'Compression' : 'Conversion'}</h2>
             </div>
             <span className="settings-badge">OPTIONS</span>
           </div>
 
+          {compressPage ? <>
           <div className="setting-block">
             <div className="setting-heading"><span>Compression</span><span>{selectedOutput}</span></div>
-            <p>{compressionLevels.length === 1 ? 'Compression is unavailable for this output.' : selectedOutput === 'GLB' ? 'GLB optimization may change texture quality or simplify static geometry.' : selectedOutput === '3MF' ? 'ZIP compression changes package size without deliberately reducing geometry.' : 'Mesh compression may reduce static geometry. The original export is retained if the result is not smaller.'}</p>
+            <p>{compressionLevels.length === 1 ? 'Compression is unavailable for this input.' : selectedOutput === 'GLB' ? 'GLB optimization may change texture quality or simplify static geometry.' : selectedOutput === '3MF' ? 'Lossless ZIP recompression preserves the original 3MF package contents.' : 'Mesh compression may reduce static geometry. The original file is retained if the result is not smaller.'}</p>
             <div className="compression-options" id="compression" role="group" aria-label="Compression level">
-              {COMPRESSION_LEVELS.map((level) => (
+              {COMPRESSION_LEVELS.filter(level => level !== 'None').map((level) => (
                 <button
                   className={compression === level ? 'compression-option selected' : 'compression-option'}
                   type="button"
                   key={level}
                   aria-pressed={compression === level}
-                  disabled={job.busy || job.canResume || downloading || !compressionLevels.includes(level)}
+                  disabled={!inputFormat || locked || !compressionLevels.includes(level)}
                   onClick={() => { setCompression(level); reset() }}
                 >{level}</button>
               ))}
@@ -229,12 +245,7 @@ function App() {
 
           <div className="setting-divider" />
 
-          <div className="setting-block color-block">
-            <div className="setting-heading"><span>Model color</span><span>PAUSED</span></div>
-            <p>Custom color is postponed. No color override will be applied.</p>
-          </div>
-
-          <div className="setting-divider" />
+          </> : <div className="setting-block"><div className="setting-heading"><span>Conversion only</span><span>NO COMPRESSION</span></div><p>Need a smaller file without changing its format? <a className="tool-link" href="/compress" aria-disabled={locked} onClick={event=>{if(locked)event.preventDefault()}}>Open compression</a>.</p></div>}
 
           <div className="setting-block output-block">
             <div className="setting-heading"><span>Output file</span><span>{job.result ? 'READY' : 'ESTIMATE'}</span></div>
@@ -250,13 +261,13 @@ function App() {
             <p>{job.busy || job.result || job.error || job.canResume ? job.stage : !file ? 'The converter selects the processing engine automatically.' : local ? 'Eligible for local conversion. Your file will not be uploaded; unsupported content requires explicit server fallback.' : serverReady ? 'This file or setting requires the server. Convert will upload to private temporary storage.' : 'This conversion requires the server, which is currently unavailable.'}</p>
             {job.progress !== null && <progress className="job-progress" value={job.progress} max={100} aria-label="Conversion stage progress" />}
             <div className="queue-meta"><span>QUEUE <b>{job.position ?? '—'}</b></span><span>EST. WAIT <b>{job.eta === null ? '—' : job.eta < 60 ? job.eta + ' sec' : Math.ceil(job.eta / 60) + ' min'}</b></span></div>
-            {job.result?.convertedBytes != null && job.result.convertedBytes > 0 && job.route === 'server' && <p>Before compression: {formatBytes(job.result.convertedBytes)} · reduction: {((1 - job.result.bytes / job.result.convertedBytes) * 100).toFixed(1)}%</p>}
+            {compressPage && job.result?.convertedBytes != null && job.result.convertedBytes > 0 && job.route === 'server' && <p>Before compression: {formatBytes(job.result.convertedBytes)} · reduction: {((1 - job.result.bytes / job.result.convertedBytes) * 100).toFixed(1)}%</p>}
             {job.result?.warning && <p className="job-warning">{job.result.warning}</p>}
             {job.error && <p className="error-message" role="alert">{job.error}</p>}
           </div>
 
           <button className="convert-button" type="button" disabled={!ready || downloading} onClick={() => begin()}>
-            <span>{job.busy || job.canResume ? job.stage : !file ? 'Add a file to continue' : local ? 'Convert in browser' : 'Convert on server'}</span>
+            <span>{job.busy || job.canResume ? job.stage : !file ? 'Add a file to continue' : compressPage ? 'Compress model' : local ? 'Convert in browser' : 'Convert on server'}</span>
             <span aria-hidden="true">↗</span>
           </button>
           {job.busy && job.serverStatus !== 'active' && <button className="job-action" type="button" onClick={() => void cancelCurrent()}>Cancel</button>}

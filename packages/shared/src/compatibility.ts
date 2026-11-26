@@ -64,3 +64,32 @@ export function getSupportedOutputs(input: ModelFormat): readonly ModelFormat[] 
 }
 
 export const CONVERSION_AVAILABLE = false
+
+/** Editorial recommendations by common downstream use, not measured conversion success rates. */
+const RECOMMENDED: Record<ModelFormat, readonly ModelFormat[]> = {
+  STL: ['3MF','OBJ','GLB','PLY'],
+  OBJ: ['GLB','FBX','STL','GLTF'],
+  FBX: ['GLB','OBJ','GLTF','USDZ'],
+  GLB: ['GLTF','USDZ','FBX','OBJ'],
+  GLTF: ['GLB','USDZ','FBX','OBJ'],
+  '3MF': ['STL','OBJ','GLB','PLY'],
+  PLY: ['STL','OBJ','GLB','3MF'],
+  USD: ['USDC','USDZ','GLB','FBX'],
+  USDA: ['USDC','USDZ','GLB','USD'],
+  USDC: ['USDA','USDZ','GLB','USD'],
+  USDZ: ['GLB','USD','USDC','GLTF'],
+  ABC: ['GLB','FBX','OBJ','USD'],
+  BVH: ['FBX','GLB','GLTF'],
+  SVG: ['PDF','STL','GLB','OBJ'],
+  PDF: ['SVG','GLB','STL','OBJ'],
+}
+export function getOutputGroups(input:ModelFormat){
+  const allowed=getSupportedOutputs(input).filter(output=>output!==input)
+  const recommended=RECOMMENDED[input].filter(output=>allowed.includes(output))
+  return {recommended,other:allowed.filter(output=>!recommended.includes(output))}
+}
+export const FORMAT_USE: Record<ModelFormat,string> = {
+  STL:'3D printing',OBJ:'Mesh exchange',FBX:'3D apps & games',GLB:'Web & 3D viewing',GLTF:'Web assets',
+  '3MF':'3D printing package',PLY:'Scans & meshes',USD:'Scene exchange',USDA:'Text USD',USDC:'Binary USD',USDZ:'Apple AR',
+  ABC:'Geometry cache',BVH:'Skeleton motion',SVG:'Vector artwork',PDF:'Document',
+}
