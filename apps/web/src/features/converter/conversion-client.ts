@@ -132,3 +132,7 @@ export async function fetchPreview(session:JobSession,expectedBytes:number,signa
 }
 
 export const createOutputPreview = (session:JobSession, signal:AbortSignal) => request<JobSession>(jobPath(session)+'/preview',{method:'POST',headers:auth(session),signal},90000)
+
+export type BatchSession=JobSession
+export const createBatch=(operation:'conversion'|'compression',signal:AbortSignal)=>request<BatchSession>('/jobs/batches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({operation}),signal})
+export const createBatchUpload=(batch:BatchSession,file:File,filename:string,output:ModelFormat,compression:CompressionLevel,signal:AbortSignal,bundleEntry?:string)=>request<Session>('/jobs/batches/'+encodeURIComponent(batch.id)+'/uploads',{method:'POST',headers:{...auth(batch),'Content-Type':'application/json'},body:JSON.stringify({filename,size:file.size,outputFormat:output,compression,color:null,...(bundleEntry?{bundleEntry}:{})}),signal})
