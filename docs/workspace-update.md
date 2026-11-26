@@ -1,5 +1,7 @@
 # Conversion workspace and separate compression
 
+Update: [large uploads](large-uploads.md) supersedes the former 200 MiB upload limit and fixed worker defaults below.
+
 - / is conversion only, always None compression. /compress is a separate tool that keeps the input format and offers Low/Medium/High for GLB, STL, OBJ, PLY and 3MF. Unsupported formats must first be converted to a compressible format. Legacy API requests can still specify compression with a different output for backward compatibility.
 - Recommended output formats are editorial choices filtered by the compatibility matrix; same-format processing is omitted in the conversion UI and available on compression where supported. 3MF recommends STL, OBJ, GLB and PLY. Other compatible outputs are grouped separately. Recommendations do not guarantee conversion success.
 - Larger responsive preview workspace keeps loaded input/output geometry and document previews visible during processing. Existing preview generation may continue; new server preview requests are disabled while conversion is active. Complex models still need an explicit server preview request; there is no fake model for unsupported input. Static sampled previews are not a complete fidelity inspection. Navigation to the other tool loads a new page and is disabled during a running or resumable job.

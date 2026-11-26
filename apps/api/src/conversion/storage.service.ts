@@ -56,10 +56,11 @@ export class StorageService implements OnModuleDestroy {
   async completeMultipart(key:string,uploadId:string,size:number,partSize:number,partCount:number){
     const {client,Bucket}=this.ready()
     // Read authoritative part sizes/ETags from storage. No untrusted ETag list in the API.
+    const deadline=AbortSignal.timeout(60000)
     const parts:{PartNumber:number;ETag:string}[]=[]
     let marker:string|undefined
     do{
-      const page=await client.send(new ListPartsCommand({Bucket,Key:key,UploadId:uploadId,PartNumberMarker:marker,MaxParts:1000}),{abortSignal:AbortSignal.timeout(8000)})
+      const page=await client.send(new ListPartsCommand({Bucket,Key:key,UploadId:uploadId,PartNumberMarker:marker,MaxParts:1000}),{abortSignal:AbortSignal.any([deadline,AbortSignal.timeout(8000)])})
       for(const part of page.Parts??[]){
         const n=parts.length+1
         if(n>partCount||part.PartNumber!==n||part.Size!==partBytes(size,partSize,n)||!part.ETag)throw new ServiceUnavailableException('Multipart upload incomplete or invalid')
@@ -71,7 +72,7 @@ export class StorageService implements OnModuleDestroy {
       marker=next
     }while(true)
     if(parts.length!==partCount)throw new ServiceUnavailableException('Multipart upload incomplete')
-    await client.send(new CompleteMultipartUploadCommand({Bucket,Key:key,UploadId:uploadId,MultipartUpload:{Parts:parts}}),{abortSignal:AbortSignal.timeout(30000)})
+    await client.send(new CompleteMultipartUploadCommand({Bucket,Key:key,UploadId:uploadId,MultipartUpload:{Parts:parts}}),{abortSignal:AbortSignal.any([deadline,AbortSignal.timeout(30000)])})
   }
   async abortMultipart(key:string,uploadId:string){
     const {client,Bucket}=this.ready()

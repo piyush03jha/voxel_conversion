@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { getOutputGroups, ACCEPTED_FORMATS, MAX_UPLOAD_BYTES, getFormatFromFilename, isConversionSupported, CONVERSION_AVAILABLE, getSupportedOutputs, getCompressionLevels } from '../../../packages/shared/src/compatibility'
 
 test('file names and upload limit', () => {
-  assert.equal(MAX_UPLOAD_BYTES, 200 * 1024 * 1024)
+  assert.equal(MAX_UPLOAD_BYTES, Number.POSITIVE_INFINITY)
   assert.equal(getFormatFromFilename('example.StL'), 'STL')
   for (const name of ['STL', '.stl', 'model.', 'model.exe', '']) assert.equal(getFormatFromFilename(name), null)
 })

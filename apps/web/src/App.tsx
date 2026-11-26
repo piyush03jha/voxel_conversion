@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   ACCEPTED_FORMATS,
-  MAX_UPLOAD_BYTES,
   getFormatFromFilename,
   getOutputGroups,
   FORMAT_USE,
@@ -19,6 +18,7 @@ const COMPRESSION_LEVELS = ['None', 'Low', 'Medium', 'High'] as const
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
+  if(bytes >= 1024 ** 3)return `${(bytes / 1024 ** 3).toFixed(2)} GB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
@@ -81,12 +81,6 @@ function App() {
       return
     }
 
-    if (candidate.size > MAX_UPLOAD_BYTES) {
-      setFile(null)
-      setFileError('That file is over the 200 MB upload limit.')
-      return
-    }
-
     if (!getFormatFromFilename(candidate.name)) {
       setFile(null)
       setFileError('This file type is not supported. Choose one of the listed formats.')
@@ -141,7 +135,7 @@ function App() {
               <span className="step-number">01</span>
               <h2>Bring in a model</h2>
             </div>
-            <span className="section-caption">MAX FILE SIZE <b>200 MB</b></span>
+            <span className="section-caption"><b>No fixed upload size limit</b></span>
           </div>
 
           <div className={`upload-card ${isDragging ? 'is-dragging' : ''} ${file ? 'has-file' : ''}`}

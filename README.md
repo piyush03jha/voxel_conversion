@@ -51,3 +51,5 @@ All 15 formats have preview routes; see [all-format preview](docs/preview-all-fo
 See [local infrastructure troubleshooting](docs/local-infra.md) for the MinIO replacement, startup checks and migration notes.
 
 See [workspace update](docs/workspace-update.md) for the separate /compress tool, format recommendations, persistent viewer and large-file worker settings.
+
+Large-upload update: [ADVFX-based multipart uploads and resource sizing](docs/large-uploads.md). No fixed application input size cap; provider, shared storage budget, disk and format constraints still apply.

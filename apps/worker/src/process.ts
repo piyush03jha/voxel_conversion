@@ -110,7 +110,7 @@ export async function runConverter(config: WorkerConfig, dir: string, input: str
 
 export function optimizationArgs(level: Exclude<CompressionLevel, 'None'>, animated: boolean, input: string, output: string) {
   // Reuse ADVFX optimize flags; presets differ by texture size and optional static mesh simplification.
-  const textureSize = { Low: '2048', Medium: '2048', High: '1024' }[level]
+  const textureSize = { Low: '2048', Medium: '1024', High: '1024' }[level]
   const simplify = level === 'High' && !animated
   return ['optimize', input, output, '--compress', 'meshopt', '--meshopt-level', 'medium',
     '--texture-compress', 'webp', '--texture-size', textureSize,

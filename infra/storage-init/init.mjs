@@ -1,5 +1,5 @@
 // Local-only bootstrap; never use these credentials or this container in production.
-import { S3Client, HeadBucketCommand, PutBucketCorsCommand, PutBucketLifecycleConfigurationCommand, PutObjectCommand, GetObjectCommand, HeadObjectCommand, DeleteObjectCommand, CopyObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, HeadBucketCommand, PutBucketCorsCommand, PutBucketLifecycleConfigurationCommand, CreateMultipartUploadCommand, UploadPartCommand, ListPartsCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand, PutObjectCommand, GetObjectCommand, HeadObjectCommand, DeleteObjectCommand, CopyObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { randomUUID } from 'node:crypto'
 import assert from 'node:assert/strict'
@@ -15,6 +15,8 @@ const send = command => client.send(command, { abortSignal: AbortSignal.timeout(
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
 const key = 'temporary/bootstrap-' + randomUUID()
 const copyKey = key + '-copy'
+const multiKey = key + '-multipart'
+let uploadId
 try {
   let ready = false
   const until = Date.now() + 120000
@@ -28,7 +30,7 @@ try {
     ExposeHeaders: ['ETag','Content-Length'], MaxAgeSeconds: 300,
   }] } }))
   await send(new PutBucketLifecycleConfigurationCommand({ Bucket, LifecycleConfiguration: { Rules: [{
-    ID: 'expire-temporary', Status: 'Enabled', Filter: { Prefix: 'temporary/' }, Expiration: { Days: 2 },
+    ID: 'expire-temporary', Status: 'Enabled', Filter: { Prefix: 'temporary/' }, Expiration: { Days: 2 }, AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 },
   }] } }))
   // Match the API's signed PUT contract. Do not weaken it to make a local provider work.
   const data = Buffer.from('local storage probe')
@@ -59,11 +61,25 @@ try {
   await send(new CopyObjectCommand({Bucket,Key:copyKey,CopySource:Bucket+'/'+key,CopySourceIfMatch:object.ETag}))
   const copied=await send(new HeadObjectCommand({Bucket,Key:copyKey}))
   assert.equal(copied.ContentLength,data.length)
-  console.log('Local S3 ready: bucket, CORS, lifecycle, signed upload, conditional write, read and copy checks passed.')
+  uploadId=(await send(new CreateMultipartUploadCommand({Bucket,Key:multiKey,ContentType:'application/octet-stream'}))).UploadId
+  assert.ok(uploadId)
+  const partUrl=await getSignedUrl(client,new UploadPartCommand({Bucket,Key:multiKey,UploadId:uploadId,PartNumber:1,ContentLength:data.length}),{expiresIn:60,signableHeaders:new Set(['content-length'])})
+  assert.ok(new URL(partUrl).searchParams.get('X-Amz-SignedHeaders')?.split(';').includes('content-length'))
+  const partPut=await fetch(partUrl,{method:'PUT',body:data,signal:AbortSignal.timeout(10000)})
+  assert.ok(partPut.ok,'Multipart signed PUT failed')
+  await partPut.body?.cancel()
+  const listed=await send(new ListPartsCommand({Bucket,Key:multiKey,UploadId:uploadId}))
+  assert.equal(listed.Parts?.[0]?.Size,data.length)
+  assert.ok(listed.Parts?.[0]?.ETag)
+  await send(new CompleteMultipartUploadCommand({Bucket,Key:multiKey,UploadId:uploadId,MultipartUpload:{Parts:[{PartNumber:1,ETag:listed.Parts[0].ETag}]}}))
+  uploadId=undefined
+  assert.equal((await send(new HeadObjectCommand({Bucket,Key:multiKey}))).ContentLength,data.length)
+  console.log('Local S3 ready: bucket, CORS, lifecycle, signed upload, conditional write, read, copy and multipart checks passed.')
 } catch(error) {
   console.error('Local S3 initialization failed:',error instanceof Error?error.message:'unknown error')
   process.exitCode=1
 } finally {
-  for(const Key of [key,copyKey])await send(new DeleteObjectCommand({Bucket,Key})).catch(()=>undefined)
+  if(uploadId)await send(new AbortMultipartUploadCommand({Bucket,Key:multiKey,UploadId:uploadId})).catch(()=>undefined)
+  for(const Key of [key,copyKey,multiKey])await send(new DeleteObjectCommand({Bucket,Key})).catch(()=>undefined)
   client.destroy()
 }

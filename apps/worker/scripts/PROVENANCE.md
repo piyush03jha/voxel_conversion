@@ -2,3 +2,4 @@
 These three scripts were originally copied unchanged from the owner's [ADVFX repository](https://github.com/piyush03jha/ADVFX/tree/0a7cd3d4c5e5210f28052a2108fc4142cc1ebe4e/3d-commerce-api/scripts) at commit 0a7cd3d4c5e5210f28052a2108fc4142cc1ebe4e. The worker now dispatches existing native and Blender routes, with explicit unsupported-code fallback for permitted native formats; invalid/OOM/timeout files are not retried. No changes to ADVFX.
 
 Multi-output extension: blender-convert.py is now adapted locally to dispatch to export_handlers.py; original import logic and GLB export block retained. Native dense mesh and 3MF import scripts remain unchanged. New vector document routes use Poppler and librsvg.
+Large-upload update: dense-mesh-to-glb.py and threemf-to-glb.py refreshed byte-for-byte from ADVFX main 94dd953772725db967b7e58126d15ff67f1e085e. Includes bounded STL stream fallback and memoryview output improvements.
