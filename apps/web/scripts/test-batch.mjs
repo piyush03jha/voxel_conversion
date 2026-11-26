@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict'
 import {mkdtemp,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
-import {join,resolve} from 'node:path'
+import { join } from 'node:path'
 import {createRequire} from 'node:module'
-import {execFileSync} from 'node:child_process'
+import { compileFixtures } from './test-compiler.mjs'
 const require=createRequire(import.meta.url),temp=await mkdtemp(join(tmpdir(),'formshift-batch-'))
 try{
-  const tsc=process.env.FORMSHIFT_TSC||require.resolve('typescript/bin/tsc')
-  execFileSync(process.execPath,[tsc,'--module','commonjs','--moduleResolution','node','--target','es2022','--lib','ES2022,DOM','--skipLibCheck','--strict','--rootDir',resolve('../..'),'--outDir',temp,'src/features/batch/zip.ts','src/features/batch/discover.ts'],{stdio:'inherit'})
+  compileFixtures(temp, ["src/features/batch/zip.ts","src/features/batch/discover.ts"])
   const {Scratch,expandAssets,zipFiles}=require(join(temp,'apps/web/src/features/batch/zip.js'))
   const {discover,textureReference,attachFolder}=require(join(temp,'apps/web/src/features/batch/discover.js'))
   Object.defineProperty(globalThis,'navigator',{value:{storage:{}},configurable:true})

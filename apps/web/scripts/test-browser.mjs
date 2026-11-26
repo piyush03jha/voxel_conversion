@@ -3,14 +3,13 @@
 import assert from 'node:assert/strict'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { createRequire } from 'node:module'
-import { execFileSync } from 'node:child_process'
+import { compileFixtures } from './test-compiler.mjs'
 const require = createRequire(import.meta.url)
 const temp = await mkdtemp(join(tmpdir(),'formshift-browser-test-'))
 try {
-  const tsc = process.env.FORMSHIFT_TSC || require.resolve('typescript/bin/tsc')
-  execFileSync(process.execPath,[tsc,'--module','commonjs','--moduleResolution','node','--target','es2022','--lib','ES2022,DOM','--skipLibCheck','--strict','--rootDir',resolve('../..'),'--outDir',temp,'src/features/converter/mesh-codec.ts','src/features/converter/preview-codec.ts'],{stdio:'inherit'})
+  compileFixtures(temp, ["src/features/converter/mesh-codec.ts","src/features/converter/preview-codec.ts","src/features/converter/browser-route.ts"])
   const {preparePreview}=require(join(temp,'apps/web/src/features/converter/preview-codec.js'))
   const {convertBytes}=require(join(temp,'apps/web/src/features/converter/mesh-codec.js'))
   const {browserRoute,LOCAL_MAX_BYTES}=require(join(temp,'apps/web/src/features/converter/browser-route.js'))
