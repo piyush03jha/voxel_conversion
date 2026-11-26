@@ -18,9 +18,9 @@ test('worker rejects unexpected keys, expiry, size and unimplemented options', (
 })
 test('existing input routing and compression presets', () => {
   for (const format of ['STL', 'OBJ', 'FBX', 'GLB', 'GLTF', '3MF', 'PLY', 'USD', 'USDA', 'USDC', 'USDZ', 'ABC', 'BVH', 'SVG', 'PDF'] as const) {
-    assert.doesNotThrow(() => checkJob(id, { ...good, inputFormat: format, inputKey: 'temporary/' + id + '/input.' + format.toLowerCase(), compression: 'High' }, 1000))
+    assert.doesNotThrow(() => checkJob(id, { ...good, inputFormat: format, inputKey: 'temporary/' + id + '/input.' + format.toLowerCase(), compression: 'None' }, 1000))
   }
-  assert.doesNotThrow(() => checkJob(id, { ...good, outputFormat: 'PLY', outputKey: 'temporary/' + id + '/output.ply', compression: 'High' }, 1000))
+  assert.doesNotThrow(() => checkJob(id, { ...good, inputFormat:'PLY', inputKey:'temporary/'+id+'/input.ply', outputFormat: 'PLY', outputKey: 'temporary/' + id + '/output.ply', compression: 'High' }, 1000))
   assert.throws(() => checkJob(id, { ...good, outputFormat: 'FBX', outputKey: 'temporary/' + id + '/output.fbx', compression: 'High' }, 1000))
   for (const [level, size] of [['Low', '2048'], ['Medium', '1024'], ['High', '1024']] as const) {
     const args = optimizationArgs(level, false, 'in.glb', 'out.glb')
@@ -50,4 +50,12 @@ test('preview job uses dedicated GLB/PNG output key and fixed compression',()=>{
   }
   assert.throws(()=>checkJob(id,{...data,outputKey:good.outputKey},1000))
   assert.throws(()=>checkJob(id,{...data,compression:'Low'},1000))
+})
+
+test('batch dependency bundle contract',()=>{
+  const bundled={...good,inputFormat:'OBJ' as const,inputKey:'temporary/'+id+'/input.zip',bundleEntry:'folder/model.obj'}
+  assert.doesNotThrow(()=>checkJob(id,bundled,1000))
+  assert.throws(()=>checkJob(id,{...bundled,bundleEntry:'../model.obj'},1000))
+  assert.throws(()=>checkJob(id,{...bundled,inputKey:'temporary/'+id+'/input.obj'},1000))
+  assert.throws(()=>checkJob(id,{...good,compression:'High'},1000))
 })

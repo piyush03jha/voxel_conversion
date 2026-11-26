@@ -45,6 +45,7 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
   const [allowServer,setAllowServer]=useState(true)
   const operation=compress?'compression':'conversion'
   const scratch=useRef<Scratch>(new Scratch()),resultScratch=useRef<Scratch>(new Scratch())
+  const cachedResults=useRef(new Map<number,Blob>())
   const batch=useRef<BatchSession|null>(null),active=useRef<AbortController|null>(null),stop=useRef(false),alive=useRef(true)
   const filesInput=useRef<HTMLInputElement>(null),folderInput=useRef<HTMLInputElement>(null)
   const locked=scanning||working||packing
@@ -73,7 +74,7 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
       if(!models.length)throw new Error('No supported models found. Add STL, OBJ, FBX, GLB, glTF, 3MF, PLY, USD variants, ABC, BVH, SVG or PDF.')
       const next=models.map((model,id):Row=>({id,model,target:compress?model.format:defaultTarget(model,common),state:'ready',stage:'Ready',progress:null}))
       await scratch.current.close();scratch.current=fresh
-      await resultScratch.current.close();resultScratch.current=new Scratch()
+      await resultScratch.current.close();resultScratch.current=new Scratch();cachedResults.current.clear()
       batch.current=null;replace(next);setSelected(0);setMessage(models.length+' models found · '+(assets.length-models.length)+' other asset files detected')
     }catch(e){await fresh.close();if(!controller.signal.aborted)setError(e instanceof Error?e.message:'File scan failed')}
     finally{if(active.current===controller)active.current=null;if(alive.current)setScanning(false)}
@@ -104,7 +105,7 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
     return {status:'expired'}
   }
   async function processRow(original:Row,signal:AbortSignal){
-    let row=rowsRef.current.find(r=>r.id===original.id)!
+    const row=rowsRef.current.find(r=>r.id===original.id)!
     const why=reason(row)
     if(why&&!row.pending){patch(row.id,{state:'skipped',stage:'Skipped',error:why});return true}
     const target=compress?row.model.format:row.target,compression=compress?level:'None'
@@ -179,12 +180,13 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
         const result=row.result;if(!result)continue
         try{
           setMessage('Collecting '+result.name)
-          let blob=result.blob
+          let blob=result.blob??cachedResults.current.get(row.id)
           if(!blob&&result.session){
             const signed=await api.download(result.session)
             const response=await fetch(signed.url,{signal:controller.signal,cache:'no-store',credentials:'omit',referrerPolicy:'no-referrer'})
             if(!response.ok||!response.body)throw new Error('Download expired or unavailable')
             blob=await disk.save(response.body,result.name,result.bytes,controller.signal)
+            cachedResults.current.set(row.id,blob)
           }
           if(blob)assets.push({path:zipName(row),file:blob})
         }catch{controller.signal.throwIfAborted();failed.push(result.name)}
@@ -236,7 +238,7 @@ export default function BatchWorkspace({compress}:{compress:boolean}){
         </div>
         <aside className="batch-preview"><div className="preview-heading"><h2>Model preview</h2></div><p className="format-footnote">{chosen?.model.dependencies.length?'Related-file models may require the converted output for preview.':''}</p><div className="preview-window"><ModelPreview key={chosen?.id??-1} file={chosen?.model.asset.file??null} result={chosen?.result??null} busy={working||packing} serverReady={serverReady}/></div></aside>
       </section>
-      <p className="privacy-note">One server job per batch. Individual results are available as soon as they finish. Keep this tab open; server files and download links expire. ZIP downloads use browser temporary disk where available.</p>
+      <p className="privacy-note">One server job per batch. Individual results are available as soon as they finish. Keep this tab open and finish downloads before clearing the batch; server files and download links expire. ZIP downloads use browser temporary disk where available.</p>
     </>}
   </main>
 }

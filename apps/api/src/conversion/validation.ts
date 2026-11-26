@@ -28,6 +28,7 @@ export function validateUpload(body: unknown): UploadRequest {
   if (typeof b.outputFormat !== 'string' || !ACCEPTED_FORMATS.includes(b.outputFormat as ModelFormat) || !isConversionSupported(inputFormat, b.outputFormat as ModelFormat)) throw new BadRequestException('Unsupported output format')
   const compression = b.compression ?? 'None'
   if (!COMPRESSION_LEVELS.includes(compression as CompressionLevel) || !getCompressionLevels(b.outputFormat as ModelFormat).includes(compression as CompressionLevel)) throw new BadRequestException('Compression level is not supported for this output format')
+  if(compression!=='None'&&inputFormat!==b.outputFormat)throw new BadRequestException('Compression must retain the input format; convert and compress separately')
   const color = b.color ?? null
   if (color !== null) throw new BadRequestException('Custom model color is paused')
   if (b.purpose !== undefined && b.purpose !== 'conversion' && b.purpose !== 'preview') throw new BadRequestException('Invalid job purpose')

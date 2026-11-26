@@ -23,6 +23,7 @@ interface Session extends UploadRequest {
   expiresAt: number
   cancelled?: boolean
   batchId?: string
+  downloadName?:string
   multipart?: { uploadId:string; partSize:number; partCount:number }
 }
 const prefix = 'formshift:{sessions}:'
@@ -157,10 +158,12 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     if(request.purpose==='preview'||(batch.operation==='conversion'&&(request.compression!=='None'||request.inputFormat===request.outputFormat))||(batch.operation==='compression'&&(request.inputFormat!==request.outputFormat||request.compression==='None'||request.bundleEntry)))throw new BadRequestException('Batch operation and settings do not match')
     const active=await redis.get(batchActive(id))
     if(active){
-      const s=await this.read(active),j=await queue.getJob(active)
-      const state=j?await j.getState():null
-      if(state==='active'||(j&&!['completed','failed'].includes(state??''))||(s&&!s.cancelled&&!j&&Date.now()<s.uploadUntil))throw new ConflictException('One server job per batch; wait for the current item')
-      await redis.eval(RELEASE_LOCK,1,batchActive(id),active)
+      await this.lock(active,async()=>{
+        const s=await this.read(active),j=await queue.getJob(active)
+        const state=j?await j.getState():null
+        if(state==='active'||(j&&!['completed','failed'].includes(state??''))||(s&&!s.cancelled&&!j&&Date.now()<s.uploadUntil))throw new ConflictException('One server job per batch; wait for the current item')
+        await redis.eval(RELEASE_LOCK,1,batchActive(id),active)
+      })
     }
     return this.create(body,false,id)
   }
@@ -179,7 +182,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const multipart = !internalCopy && request.originalBytes > SINGLE_PUT_THRESHOLD
     const uploadSeconds = multipart ? this.config.multipartSeconds : this.config.uploadSeconds
     const session: Session = {
-      ...request, id, hash: tokenHash(token), ...(batchId?{batchId}:{}),
+      ...request, id, hash: tokenHash(token), ...(batchId?{batchId,downloadName:((body as {filename:string}).filename.replace(/\.[^.]+$/,'').replace(/[^\p{L}\p{N} ._-]/gu,'_').slice(0,160)||'model')+'.'+request.outputFormat.toLowerCase()}:{}),
       inputKey: bundleInputKey(id,request.inputFormat,request.bundleEntry),
       outputKey: jobOutputKey(id, request.inputFormat, request.outputFormat, request.purpose),
       uploadUntil: now + uploadSeconds * 1000,
@@ -349,7 +352,8 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const format = s.purpose === 'preview' ? previewKind(s.inputFormat) : s.outputFormat
     const seconds = Math.min(this.config.downloadSeconds, Math.floor((s.expiresAt - Date.now()) / 1000))
     if (seconds < 1) throw new ConflictException('Job expired')
-    return { url: await this.storage.signDownload(s.outputKey, seconds, format, s.purpose === 'preview'), filename: (s.purpose === 'preview' ? 'preview.' : 'converted.') + format.toLowerCase(), expiresIn: seconds }
+    const filename=s.downloadName??((s.purpose === 'preview' ? 'preview.' : 'converted.') + format.toLowerCase())
+    return { url: await this.storage.signDownload(s.outputKey, seconds, format, s.purpose === 'preview',filename), filename, expiresIn: seconds }
   }
   private startSweep() {
     if (this.closing || this.sweepTask || !this.storage.configured) return

@@ -53,3 +53,5 @@ See [local infrastructure troubleshooting](docs/local-infra.md) for the MinIO re
 See [workspace update](docs/workspace-update.md) for the separate /compress tool, format recommendations, persistent viewer and large-file worker settings.
 
 Large-upload update: [ADVFX-based multipart uploads and resource sizing](docs/large-uploads.md). No fixed application input size cap; provider, shared storage budget, disk and format constraints still apply.
+
+Batch tools: [/batch](/batch) and [/compress/batch](/compress/batch). See [batch processing](docs/batch-processing.md) for capabilities, resource limits and local tests. Conversion and compression are separate API operations; no combined format change and optional compression.

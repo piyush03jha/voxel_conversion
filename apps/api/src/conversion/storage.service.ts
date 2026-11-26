@@ -97,10 +97,13 @@ export class StorageService implements OnModuleDestroy {
     const { client, Bucket } = this.ready()
     await client.send(new CopyObjectCommand({ Bucket, Key: target, CopySource: encodeURIComponent(Bucket) + '/' + source.split('/').map(encodeURIComponent).join('/'), CopySourceIfMatch: etag }), { abortSignal: AbortSignal.timeout(60000) })
   }
-  async signDownload(key: string, expiresIn: number, format: ModelFormat | 'PNG', preview = false) {
+  async signDownload(key: string, expiresIn: number, format: ModelFormat | 'PNG', preview = false, filename?:string) {
     const { client, Bucket } = this.ready()
+    const name=filename??((preview?'preview.':'converted.')+format.toLowerCase())
+    const fallback=name.replace(/[^a-zA-Z0-9 ._-]/g,'_')
+    const encoded=encodeURIComponent(name).replace(/['()*]/g,c=>'%'+c.charCodeAt(0).toString(16).toUpperCase())
     return getSignedUrl(client, new GetObjectCommand({
-      Bucket, Key: key, ResponseContentDisposition: 'attachment; filename="' + (preview ? 'preview.' : 'converted.') + format.toLowerCase() + '"', ResponseContentType: 'application/octet-stream',
+      Bucket, Key: key, ResponseContentDisposition: 'attachment; filename="'+fallback+'"; filename*=UTF-8\'\''+encoded, ResponseContentType: 'application/octet-stream',
     }), { expiresIn })
   }
   onModuleDestroy() { this.client?.destroy() }

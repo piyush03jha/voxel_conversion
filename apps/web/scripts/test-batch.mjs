@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict'
+import {mkdtemp,rm} from 'node:fs/promises'
+import {tmpdir} from 'node:os'
+import {join,resolve} from 'node:path'
+import {createRequire} from 'node:module'
+import {execFileSync} from 'node:child_process'
+const require=createRequire(import.meta.url),temp=await mkdtemp(join(tmpdir(),'formshift-batch-'))
+try{
+  const tsc=process.env.FORMSHIFT_TSC||require.resolve('typescript/bin/tsc')
+  execFileSync(process.execPath,[tsc,'--module','commonjs','--moduleResolution','node','--target','es2022','--lib','ES2022,DOM','--skipLibCheck','--strict','--rootDir',resolve('../..'),'--outDir',temp,'src/features/batch/zip.ts','src/features/batch/discover.ts'],{stdio:'inherit'})
+  const {Scratch,expandAssets,zipFiles}=require(join(temp,'apps/web/src/features/batch/zip.js'))
+  const {discover}=require(join(temp,'apps/web/src/features/batch/discover.js'))
+  Object.defineProperty(globalThis,'navigator',{value:{storage:{}},configurable:true})
+  const signal=new AbortController().signal
+  const asset=(path,contents)=>({path,file:new File([contents],path.split('/').at(-1))})
+  const expand=async(blob,name='test.zip')=>expandAssets([asset(name,blob)],new Scratch(),signal,()=>{})
+  const archive=await zipFiles([asset('models/a.obj','mtllib a.mtl\nv 0 0 0\n'),asset('models/a.mtl','map_Kd ../textures/a.png'),asset('textures/a.png','png')],signal)
+  const entries=await expand(archive)
+  assert.deepEqual(entries.map(e=>e.path),['test/models/a.obj','test/models/a.mtl','test/textures/a.png'])
+  const models=await discover(entries,signal);assert.equal(models.length,1);assert.equal(models[0].dependencies.length,2);assert.equal(models[0].error,undefined)
+  const missing=await discover([asset('a.obj','mtllib a.mtl')],signal);assert.match(missing[0].error,/Missing dependency/)
+  const gltf=await discover([asset('a.gltf',JSON.stringify({buffers:[{uri:'data/a.bin'}]})),asset('data/a.bin','binary')],signal);assert.equal(gltf[0].dependencies.length,1)
+  const nested=await zipFiles([asset('inner.zip',archive)],signal);assert.equal((await expand(nested))[0].path,'test/inner/models/a.obj')
+  const tooDeep=await zipFiles([asset('middle.zip',nested)],signal);await assert.rejects(expand(tooDeep))
+  await assert.rejects(zipFiles([asset('../bad.obj','x')],signal))
+  await assert.rejects(zipFiles([asset('a.obj','x'),asset('A.obj','y')],signal))
+  const corrupt=new Uint8Array(await archive.arrayBuffer()),d=new DataView(corrupt.buffer)
+  corrupt[30+d.getUint16(26,true)+d.getUint16(28,true)]^=1
+  await assert.rejects(expand(corrupt))
+  console.log('PASS: ZIP64 round trip, OBJ/MTL and glTF dependencies, missing assets, nested archives, unsafe paths, duplicates, CRC')
+}finally{await rm(temp,{recursive:true,force:true})}

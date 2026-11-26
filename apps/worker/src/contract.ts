@@ -8,6 +8,7 @@ import { isWorkerRoute, COMPRESSION_LEVELS } from '../../../packages/shared/src/
 export function checkJob(id: string | undefined, data: ConversionJobData, now = Date.now()) {
   if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) throw new Error('INVALID_JOB')
   if (!data || !isWorkerRoute(data.inputFormat, data.outputFormat) || !COMPRESSION_LEVELS.includes(data.compression) || !getCompressionLevels(data.outputFormat).includes(data.compression) || data.color !== null) throw new Error('UNSUPPORTED_ROUTE')
+  if(data.compression!=='None'&&data.inputFormat!==data.outputFormat)throw new Error('UNSUPPORTED_ROUTE')
   if (data.purpose !== undefined && data.purpose !== 'preview' && data.purpose !== 'conversion') throw new Error('INVALID_PURPOSE')
   if (data.purpose === 'preview' && (data.outputFormat !== 'GLB' || data.compression !== 'None')) throw new Error('INVALID_PREVIEW')
   if(data.bundleEntry!==undefined&&(!safeBatchPath(data.bundleEntry)||!['OBJ','GLTF'].includes(data.inputFormat)||getFormatFromFilename(data.bundleEntry)!==data.inputFormat||data.compression!=='None'||data.purpose==='preview'))throw new Error('INVALID_BUNDLE')

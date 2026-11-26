@@ -22,6 +22,8 @@
     "test:native": "python3 apps/worker/scripts/test-native.py",
     "test:export": "python3 apps/worker/scripts/test-export.py",
     "test:browser": "npm run test:browser --prefix apps/web",
-    "test:large": "python3 apps/worker/scripts/test-large.py"
+    "test:large": "python3 apps/worker/scripts/test-large.py",
+    "test:batch": "npm run test:batch --prefix apps/web && python3 apps/worker/scripts/test-bundle.py",
+    "smoke:batch": "npm run smoke:batch --prefix apps/api"
   }
 }

@@ -7,7 +7,7 @@ import { ACCEPTED_FORMATS } from '../../../packages/shared/src/compatibility'
 const good = { filename: 'model.stl', size: 100, outputFormat: 'GLB' }
 test('metadata validation accepts large uploads and rejects invalid provider sizes', () => {
   assert.deepEqual(validateUpload(good), { inputFormat: 'STL', originalBytes: 100, outputFormat: 'GLB', compression: 'None', color: null })
-  assert.equal(validateUpload({ ...good, size: 1024 ** 3, compression: 'High' }).compression, 'High')
+  assert.equal(validateUpload({ ...good, size: 1024 ** 3, outputFormat:'STL', compression: 'High' }).compression, 'High')
   assert.throws(() => validateUpload({ ...good, color: '#ABCDEF' }))
   for (const bad of [{ size: 0 }, { size: 6 * 1024 ** 4 }, { size: Infinity }, { size: 1.5 }, { size: '10' }, { filename: '../test.stl' }, { filename: 'test.exe' }, { outputFormat: 'BVH' }, { outputFormat: 'FBX', compression: 'High' }, { color: '#abc' }, { compression: 'Extreme' }, { inputKey: 'arbitrary' }]) assert.throws(() => validateUpload({ ...good, ...bad }))
   assert.throws(() => validateUpload(null))
@@ -36,4 +36,11 @@ test('preview requests are isolated and have fixed options', () => {
   assert.throws(()=>validateUpload({...good,purpose:'preview',compression:'High'}))
   assert.throws(()=>validateUpload({...good,purpose:'preview',outputFormat:'STL'}))
   assert.throws(()=>validateUpload({...good,purpose:'unknown'}))
+})
+
+test('bundle metadata and separate operations',()=>{
+  assert.equal(validateUpload({filename:'a.obj',size:123,outputFormat:'GLB',bundleEntry:'folder/a.obj'}).bundleEntry,'folder/a.obj')
+  for(const bundleEntry of ['../a.obj','/a.obj','a.gltf','a\\a.obj'])assert.throws(()=>validateUpload({filename:'a.obj',size:123,outputFormat:'GLB',bundleEntry}))
+  assert.throws(()=>validateUpload({...good,compression:'High'}))
+  assert.throws(()=>validateUpload({filename:'a.obj',size:123,outputFormat:'OBJ',compression:'High',bundleEntry:'a.obj'}))
 })

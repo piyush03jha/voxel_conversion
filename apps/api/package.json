@@ -12,7 +12,8 @@
     "test": "npm run build && node --test dist/apps/api/src/*.test.js dist/apps/worker/src/*.test.js",
     "smoke:queue": "node --env-file-if-exists=../../.env scripts/smoke-queue.mjs",
     "start:worker": "node --env-file-if-exists=../../.env dist/apps/worker/src/main.js",
-    "smoke:conversion": "node --env-file-if-exists=../../.env scripts/smoke-conversion.mjs"
+    "smoke:conversion": "node --env-file-if-exists=../../.env scripts/smoke-conversion.mjs",
+    "smoke:batch": "node --env-file-if-exists=../../.env scripts/smoke-batch.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.0",

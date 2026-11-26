@@ -6,7 +6,9 @@ const fixture = process.env.SMOKE_MODEL_PATH
 const filename = fixture ? basename(fixture) : 'test.stl'
 const file = new Blob([fixture ? await readFile(fixture) : 'solid test\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid test\n'], { type: 'application/octet-stream' })
 const target = process.env.SMOKE_OUTPUT_FORMAT ?? 'GLB'
-const levels = process.env.SMOKE_COMPRESSION ? [process.env.SMOKE_COMPRESSION] : ['GLB', 'STL', 'OBJ', 'PLY', '3MF'].includes(target) ? ['None', 'Low', 'Medium', 'High'] : ['None']
+const source=filename.split('.').at(-1).toUpperCase()
+const levels=process.env.SMOKE_COMPRESSION?[process.env.SMOKE_COMPRESSION]:source===target&&['GLB','STL','OBJ','PLY','3MF'].includes(target)?['None','Low','Medium','High']:['None']
+if(source!==target&&levels.some(level=>level!=='None'))throw Error('Compression smoke tests require SMOKE_OUTPUT_FORMAT equal to the input format')
 async function api(path, options = {}) {
   const response = await fetch(base + path, { ...options, signal: AbortSignal.timeout(15000) })
   const data = await response.json()
