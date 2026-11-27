@@ -13,6 +13,8 @@ import { useConversion } from './features/converter/use-conversion'
 import BatchWorkspace, {dropped} from './features/batch/BatchWorkspace'
 import type {Asset} from './features/batch/zip'
 import ModelPreview from './features/converter/ModelPreview'
+import {findGuide,GuideNotes,GuideLinks,useGuideMetadata} from './features/guides/Guides'
+import {VoxelNav,VoxelCredit,PrintNextStep,printableFormat} from './features/guides/VoxelLinks'
 import './App.css'
 
 const COMPRESSION_LEVELS = ['None', 'Low', 'Medium', 'High'] as const
@@ -25,7 +27,9 @@ function formatBytes(bytes: number) {
 }
 
 function SingleWorkspace({onPackage}:{onPackage:(assets:Promise<Asset[]>,compress:boolean)=>void}) {
-  const compressPage = window.location.pathname.replace(/\/$/, '') === '/compress'
+  const path=window.location.pathname.replace(/\/$/,'')
+  const guide=findGuide(path)
+  const compressPage = path.startsWith('/compress')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
   const [fileError, setFileError] = useState('')
@@ -90,7 +94,9 @@ function SingleWorkspace({onPackage}:{onPackage:(assets:Promise<Asset[]>,compres
     }
 
     setFile(candidate)
-    setOutputFormat(getOutputGroups(getFormatFromFilename(candidate.name)!).recommended[0] ?? 'GLB')
+    const format=getFormatFromFilename(candidate.name)!
+    const options=getOutputGroups(format)
+    setOutputFormat(guide?.source===format&&!compressPage&&[...options.recommended,...options.other].some(f=>f===guide.target)?guide.target:options.recommended[0]??'GLB')
     setCompression(compressPage ? 'Medium' : 'None')
     setFileError('')
   }
@@ -113,17 +119,15 @@ function SingleWorkspace({onPackage}:{onPackage:(assets:Promise<Asset[]>,compres
         </nav>
         <div className="topbar-right">
           <span className="service-indicator"><i /> {serverReady ? 'Server ready' : apiOnline ? 'Server conversion offline' : 'Browser mode'}</span>
-          <a className="github-link" href="https://github.com/piyush03jha/voxel_conversion" target="_blank" rel="noreferrer">
-            About the project <span aria-hidden="true">↗</span>
-          </a>
+          <VoxelNav/>
         </div>
       </header>
 
       <section className="intro">
         <div className="intro-copy">
           <div className="eyebrow"><span>01</span> THE 3D FILE WORKSHOP</div>
-          <h1>{compressPage ? <>Make your models<br /><span>lighter.</span></> : <>Make your models<br /><span>work everywhere.</span></>}</h1>
-          <p>{compressPage ? 'Reduce model size without changing its file format. Choose a compression level.' : 'Convert your 3D model into a compatible format, with no optional compression applied.'}</p>
+          <h1>{guide ? guide.title : compressPage ? <>Make your models<br /><span>lighter.</span></> : <>Make your models<br /><span>work everywhere.</span></>}</h1>
+          <p>{guide ? guide.description : compressPage ? 'Reduce model size without changing its file format. Choose a compression level.' : 'Convert your 3D model into a compatible format, with no optional compression applied.'}</p>
         </div>
         <div className="intro-note">
           <span className="note-icon" aria-hidden="true">✳</span>
@@ -187,6 +191,7 @@ function SingleWorkspace({onPackage}:{onPackage:(assets:Promise<Asset[]>,compres
             {file && <button className="remove-file" type="button" disabled={job.busy || job.canResume || downloading} onClick={() => { setFile(null); setFileError(''); reset() }} aria-label="Remove selected file">×</button>}
           </div>
           {fileError && <p className="error-message" role="alert">{fileError}</p>}
+          {guide&&inputFormat&&inputFormat!==guide.source&&<p className="format-footnote">This guide is for {guide.source}. Your {inputFormat} file can still use the compatible options shown here.</p>}
           <p className="format-footnote" style={{marginTop:12,marginBottom:16}}>Have a model folder with textures or materials? <a className="tool-link" href={compressPage?'/compress/package':'/package'} aria-disabled={locked} onClick={event=>{if(locked)event.preventDefault()}}>Open model package</a>. For independent models, use <a className="tool-link" href={compressPage?'/compress/batch':'/batch'} aria-disabled={locked} onClick={event=>{if(locked)event.preventDefault()}}>batch {compressPage?'compression':'conversion'}</a>.</p>
 
           <div className="preview-heading">
@@ -282,12 +287,15 @@ function SingleWorkspace({onPackage}:{onPackage:(assets:Promise<Asset[]>,compres
           {job.busy && job.serverStatus === 'active' && <p className="privacy-note">Active server conversions cannot be cancelled yet.</p>}
           {job.result && <button className="job-action download-action" type="button" disabled={downloading} onClick={() => void downloadResult()}>{downloading ? 'Preparing download…' : 'Download ' + selectedOutput}</button>}
           {downloadError && <p className="error-message" role="alert">{downloadError}</p>}
+          {job.result&&!job.busy&&printableFormat(selectedOutput)&&<PrintNextStep placement={compressPage?'compression_result':'conversion_result'}/>}
           <p className="privacy-note"><span aria-hidden="true">⌑</span> {job.route === 'browser' || (!job.route && local) ? 'Local conversion: no model upload' : 'Server files are temporary; downloads expire'}</p>
         </aside>
       </section>
 
+      {guide&&<GuideNotes guide={guide} locked={locked}/>}
+      {!locked&&<GuideLinks/>}
       <footer className="page-footer">
-        <span>FORM SHIFT <span className="footer-dot">·</span> 3D FILE WORKSHOP</span>
+        <VoxelCredit/>
         <span>SUPPORTED INPUTS <b>{ACCEPTED_FORMATS.join('  ·  ')}</b></span>
       </footer>
     </main>
@@ -297,6 +305,7 @@ function SingleWorkspace({onPackage}:{onPackage:(assets:Promise<Asset[]>,compres
 export default function App(){
   const [path,setPath]=useState(window.location.pathname.replace(/\/$/,''))
   const [initialAssets,setInitialAssets]=useState<Promise<Asset[]>|undefined>()
+  useGuideMetadata(path)
   useEffect(()=>{const pop=()=>{setInitialAssets(undefined);setPath(window.location.pathname.replace(/\/$/,''))};window.addEventListener('popstate',pop);return()=>window.removeEventListener('popstate',pop)},[])
   function openPackage(assets:Promise<Asset[]>,compress:boolean){
     // Attach a rejection handler immediately while React mounts the workspace.

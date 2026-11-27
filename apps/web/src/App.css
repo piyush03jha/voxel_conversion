@@ -307,3 +307,22 @@
 @media(max-width:560px){.batch-options{padding:12px;gap:12px}.batch-actions{width:100%}.batch-actions .convert-button,.batch-actions .job-action{width:100%}.batch-row{padding:10px}.batch-shell .tool-nav a{font-size:.875rem;padding:8px}.batch-upload{padding:12px}}
 
 .dependency-list{color:#aab9b2;font-size:.875rem;line-height:1.6}.dependency-list summary{cursor:pointer;color:var(--accent)}.dependency-list small{display:block;padding-left:12px}.batch-row-status label{color:#dce5e1}.batch-row-status input{accent-color:var(--accent)}
+
+/* Quiet, contextual links: no ad banners, overlays or competing primary buttons. */
+.voxel-nav,.voxel-credit a,.print-next-step a,.guide-links a {color:#b0c6bb;text-decoration:underline;text-decoration-color:#53675c;text-underline-offset:3px;}
+.voxel-nav {font-size:.875rem;white-space:nowrap;}
+.voxel-nav:hover,.voxel-credit a:hover,.print-next-step a:hover,.guide-links a:hover{color:var(--accent);}
+.voxel-nav:focus-visible,.voxel-credit a:focus-visible,.print-next-step a:focus-visible,.guide-links a:focus-visible{outline:2px solid var(--accent);outline-offset:4px;}
+.print-next-step {margin:20px 0 12px;padding:16px 0 0;border-top:1px solid #35443d;max-width:64ch;}
+.print-next-step h3 {font-size:1rem;font-weight:600;margin:0 0 8px;color:#e0ece5;}
+.print-next-step p {font-size:.9375rem;line-height:1.6;color:#aab9b2;margin:0 0 10px;}
+.print-next-step a {font-size:.9375rem;font-weight:500;}
+.print-next-step small {display:block;color:#aab9b2;font-size:.8125rem;margin-top:8px;}
+.workshop-guide{max-width:76ch;margin:40px 0 24px;color:#aab9b2;line-height:1.7;}
+.workshop-guide h2{color:#e0ece5;font-size:1.25rem;margin:0 0 12px;}
+.workshop-guide h3{color:#dce5e1;font-size:1.0625rem;margin:20px 0 8px;}
+.guide-links{margin:32px 0 20px;padding-top:20px;border-top:1px solid #35443d;font-size:.875rem;color:#aab9b2;display:flex;flex-wrap:wrap;gap:12px 20px;}
+.guide-links>span{font-weight:600;color:#dce5e1;}
+.guide-links>div{display:flex;flex-wrap:wrap;gap:12px 20px;}
+.voxel-credit{font-family:inherit;font-size:.875rem;text-transform:none;letter-spacing:normal;}
+@media(max-width:900px){.topbar:has(.voxel-nav){height:auto;min-height:82px;flex-wrap:wrap;gap:10px;padding:12px 0;}.topbar:has(.voxel-nav) .tool-nav{order:3;width:100%;flex-wrap:wrap;}.topbar:has(.voxel-nav) .topbar-right{flex-wrap:wrap;justify-content:flex-end;}.voxel-nav{font-size:.8125rem;}}

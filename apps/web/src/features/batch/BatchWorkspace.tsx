@@ -1,4 +1,5 @@
 import {useEffect,useRef,useState} from 'react'
+import {VoxelNav,VoxelCredit,PrintNextStep,printableFormat} from '../guides/VoxelLinks'
 import type {ChangeEvent,DragEvent} from 'react'
 import {ACCEPTED_FORMATS,getCompressionLevels,getOutputGroups,isConversionSupported,getOutputWarning} from '../converter/compatibility'
 import type {ModelFormat,CompressionLevel} from '../converter/compatibility'
@@ -271,7 +272,7 @@ export default function BatchWorkspace({compress,singlePackage=false,initialAsse
   const included=rows.filter(r=>r.include),includedDone=included.filter(r=>r.state==='done').length
   const changeCommon=(value:ModelFormat)=>{setCommon(value);replace(rowsRef.current.map(row=>row.state==='done'||row.pending?row:{...row,target:value,state:'ready',stage:'Ready',error:undefined}))}
   return <main className="app-shell batch-shell">
-    <header className="topbar"><a className="brand" href="/">formshift</a><nav className="tool-nav" aria-label="Model tools"><a href="/" aria-disabled={locked||pending} onClick={e=>{if(locked||pending)e.preventDefault()}}>Convert</a><a href="/compress" aria-disabled={locked||pending} onClick={e=>{if(locked||pending)e.preventDefault()}}>Compress</a><a href="/batch" aria-current={!compress?'page':undefined} aria-disabled={locked||pending} onClick={e=>{if(locked||pending)e.preventDefault()}}>Batch convert</a><a href="/compress/batch" aria-current={compress?'page':undefined} aria-disabled={locked||pending} onClick={e=>{if(locked||pending)e.preventDefault()}}>Batch compress</a></nav><span className="service-indicator"><i/>{serverReady?'Server ready':'Browser mode'}</span></header>
+    <header className="topbar"><a className="brand" href="/">formshift</a><nav className="tool-nav" aria-label="Model tools"><a href="/" aria-disabled={locked||pending} onClick={e=>{if(locked||pending)e.preventDefault()}}>Convert</a><a href="/compress" aria-disabled={locked||pending} onClick={e=>{if(locked||pending)e.preventDefault()}}>Compress</a><a href="/batch" aria-current={!compress?'page':undefined} aria-disabled={locked||pending} onClick={e=>{if(locked||pending)e.preventDefault()}}>Batch convert</a><a href="/compress/batch" aria-current={compress?'page':undefined} aria-disabled={locked||pending} onClick={e=>{if(locked||pending)e.preventDefault()}}>Batch compress</a></nav><span className="service-indicator"><i/>{serverReady?'Server ready':'Browser mode'}</span><VoxelNav/></header>
     <section className="intro batch-intro"><div className="intro-copy"><div className="eyebrow">MULTIPLE FILES · PRIVATE PROCESSING</div><h1>{compress?'Compress':'Convert'} <span>{singlePackage?'your complete model.':'your models together.'}</span></h1><p>{compress?'Reduce supported models individually, without changing file formats.':'Choose a common output or set the format for each model. Conversion never applies optional compression.'}</p></div></section>
     <section className="batch-upload upload-card" onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();if(!locked&&!pending){const files=dropped(e);void scan(()=>files)}}}>
       <input ref={filesInput} type="file" multiple className="visually-hidden" disabled={locked||pending} onChange={pick} aria-label="Select multiple files or ZIP"/>
@@ -301,7 +302,9 @@ export default function BatchWorkspace({compress,singlePackage=false,initialAsse
         </div>
         <aside className="batch-preview"><div className="preview-heading"><h2>Model preview</h2></div><p className="format-footnote">{chosen?.model.dependencies.length?'Package preview includes the related files in its import. Preview shows static geometry only.':''}</p>{chosen&&chosen.include&&chosen.model.dependencies.length>0&&!chosen.previewFile&&<button className="job-action" type="button" disabled={locked||!serverReady||!!chosen.model.error||!!chosen.model.needsAttachment||rows.some(r=>r.pending||r.previewPending&&r.id!==chosen.id)} onClick={()=>void previewPackage(chosen)}>{chosen.previewPending?'Resume package preview':'Generate package preview'}</button>}<div className="preview-window"><ModelPreview key={String(chosen?.id??-1)+':'+(chosen?.previewFile?'package':'source')} file={chosen?.model.dependencies.length?chosen.previewFile??null:chosen?.model.asset.file??null} result={chosen?.result??null} busy={working||packing} serverReady={serverReady}/></div></aside>
       </section>
+      {!working&&!packing&&rows.some(row=>row.result&&printableFormat(row.target)&&!row.result.name.toLowerCase().endsWith('.zip'))&&<PrintNextStep placement={singlePackage?'package_result':'batch_result'}/>}
       <p className="privacy-note">One server job per batch. Individual results are available as soon as they finish. Keep this tab open and finish downloads before clearing the batch; server files and download links expire. ZIP downloads use browser temporary disk where available.</p>
     </>}
+    <footer className="page-footer"><VoxelCredit/></footer>
   </main>
 }

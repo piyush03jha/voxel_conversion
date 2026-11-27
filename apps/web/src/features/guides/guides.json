@@ -1,0 +1,62 @@
+[
+  {
+    "path": "/3mf-to-stl",
+    "source": "3MF",
+    "target": "STL",
+    "title": "Convert 3MF to STL",
+    "description": "Convert a 3MF model to STL for slicers and geometry-only 3D printing workflows.",
+    "heading": "When to use STL instead of 3MF",
+    "body": "3MF can store units, multiple objects, materials and other printing information. STL stores triangle geometry only. Use STL when your slicer or downstream tool requires it; otherwise keeping the original 3MF may preserve more information.",
+    "check": "Compare the exported dimensions with your original model in your slicer. STL has no unit metadata; this converter writes millimetre coordinates."
+  },
+  {
+    "path": "/obj-to-stl",
+    "source": "OBJ",
+    "target": "STL",
+    "title": "Convert OBJ to STL",
+    "description": "Export OBJ triangle geometry to STL for 3D printing and mesh workflows.",
+    "heading": "Geometry rather than textures",
+    "body": "OBJ can refer to MTL files and external textures. STL cannot carry these materials. If your OBJ came in a folder, use the model-package tool to keep its dependencies available during import.",
+    "check": "OBJ does not define physical units. Check the size, closed surfaces and orientation in your slicer before printing."
+  },
+  {
+    "path": "/fbx-to-stl",
+    "source": "FBX",
+    "target": "STL",
+    "title": "Convert FBX to STL",
+    "description": "Export a static mesh from an FBX scene as STL for printing and geometry workflows.",
+    "heading": "From an animated scene to a static mesh",
+    "body": "FBX may contain rigs, animation, materials and multiple objects. STL represents static surface triangles. Select or prepare the intended pose and geometry before exporting; animation and appearance will not survive the STL format.",
+    "check": "Inspect the exported mesh for separate shells, scale and thin features. A successful format conversion is not a printability check."
+  },
+  {
+    "path": "/glb-to-stl",
+    "source": "GLB",
+    "target": "STL",
+    "title": "Convert GLB to STL",
+    "description": "Convert a GLB scene into static STL geometry for use in a slicer.",
+    "heading": "From a web model to printable geometry",
+    "body": "GLB can contain meshes, textures, materials and animation in one file. STL retains static triangle geometry, without textures or animation. The conversion does not automatically make a model watertight.",
+    "check": "Check model size, wall thickness and non-manifold edges in your slicer. The STL export uses millimetre coordinates."
+  },
+  {
+    "path": "/compress/stl",
+    "source": "STL",
+    "target": "STL",
+    "title": "Compress an STL file",
+    "description": "Reduce STL file size using same-format mesh compression without a format change.",
+    "heading": "Balance file size and geometry detail",
+    "body": "STL size depends largely on triangle count. The mesh compression presets may simplify static geometry, so a smaller file can lose fine features. Keep an original copy and choose the lightest useful compression level.",
+    "check": "Compare the result in your slicer before printing. If the candidate is not smaller, the original is retained."
+  },
+  {
+    "path": "/compress/3mf",
+    "source": "3MF",
+    "target": "3MF",
+    "title": "Compress a 3MF file",
+    "description": "Recompress a 3MF package without changing its format or deliberately simplifying its geometry.",
+    "heading": "Keep the model package intact",
+    "body": "3MF is already a ZIP-based package. Lossless recompression changes how its entries are stored, not the geometry or texture contents. Some already-compressed packages may not become smaller.",
+    "check": "Keep the original file. The converter retains it when lossless recompression cannot reduce the size."
+  }
+]

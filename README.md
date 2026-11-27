@@ -58,3 +58,5 @@ Batch tools: [/batch](/batch) and [/compress/batch](/compress/batch). See [batch
 
 Single-model folders and ZIP packages: [/package](/package), [/compress/package](/compress/package). See [model packages](docs/model-packages.md).
 STL dimensions: [millimetre unit convention and regression tests](docs/stl-units.md).
+
+Contextual printing links and static format guides: [Voxel3D referrals and deployment](docs/voxel-referrals.md).
