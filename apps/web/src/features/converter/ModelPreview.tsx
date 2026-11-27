@@ -3,7 +3,7 @@ import SampleViewport from './SampleViewport'
 import type { Result } from './use-conversion'
 import * as api from './conversion-client'
 import type { JobSession } from './conversion-client'
-import { getFormatFromFilename, MAX_UPLOAD_BYTES } from './compatibility'
+import { getFormatFromFilename } from './compatibility'
 import { LOCAL_MAX_BYTES } from './browser-route'
 
 export function canPreview(name:string,bytes:number){
@@ -59,16 +59,10 @@ export default function ModelPreview({file,result,busy,serverReady}:{file:File|n
     setRunning(null)
     setStates(prev=>({...prev,[run.target]:{stage:'Preview stopped. A running server job may continue until expiry.'}}))
   }
-  useEffect(()=>{
-    if(busy)stop()
-    // Unmount releases browser references and cancels a queued preview if possible.
-    return undefined
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[busy])
   useEffect(()=>()=>{const run=runRef.current;runRef.current=null;run?.controller.abort();if(run?.session)void api.cancel(run.session).catch(()=>undefined)},[])
 
   async function generate(){
-    if(busy||runRef.current||!serverReady||!name||!size||size>MAX_UPLOAD_BYTES)return
+    if(busy||runRef.current||!serverReady||!name||!size)return
     const run:Run={controller:new AbortController(),target:selected}
     const signal=run.controller.signal
     runRef.current=run;setRunning(selected)
@@ -113,12 +107,13 @@ export default function ModelPreview({file,result,busy,serverReady}:{file:File|n
     }
   }
   const generated=current?.preview
-  const previewFile=busy?null:generated?.kind==='GLB'?generated.file:local?(source??(localFile && localFile.result===result?localFile.file:null)):null
-  const raster=!busy&&generated?.kind==='PNG'?generated.blob:null
-  const message=busy?'Preview paused during processing.':running===selected?current?.stage??'Generating preview…':(current?.error&&!previewFile?current.error:undefined)??(generated?'':selected==='output'&&local&&localError!==result&&!previewFile?'Loading output preview…':name&&!previewFile&&!raster?'Generate a server preview for this format or model.':'')
-  const canGenerate=!!name&&!!size&&size<=MAX_UPLOAD_BYTES&&serverReady&&!busy&&!running
+  const previewFile=generated?.kind==='GLB'?generated.file:local?(source??(localFile && localFile.result===result?localFile.file:null)):null
+  const raster=generated?.kind==='PNG'?generated.blob:null
+  const message=running===selected?current?.stage??'Generating preview…':(current?.error&&!previewFile?current.error:undefined)??(generated?'':selected==='output'&&local&&localError!==result&&!previewFile?'Loading output preview…':name&&!previewFile&&!raster?'Generate a server preview for this format or model.':'')
+  const canGenerate=!!name&&!!size&&serverReady&&!busy&&!running
   return <>
-    {raster?<RasterPreview blob={raster}/>:message?<div className="scene-loading preview-message" role="status">{message}</div>:<SampleViewport file={previewFile}/>}
+    {raster?<RasterPreview blob={raster}/>:previewFile?<SampleViewport file={previewFile}/>:message?<div className="scene-loading preview-message" role="status">{message}</div>:<SampleViewport file={null}/>}
+    {busy&&<div className="preview-processing" role="status">Processing file · viewer remains available</div>}
     <div className="preview-label"><span className="live-dot"/> {busy?'PROCESSING':raster?'DOCUMENT PREVIEW':previewFile?selected==='output'?'OUTPUT GEOMETRY':'INPUT GEOMETRY':name?'MODEL PREVIEW':'INTERACTIVE SAMPLE SCENE'}</div>
     {result&&<div className="preview-switch" role="group" aria-label="Preview source">
       <button type="button" aria-pressed={selected==='input'} disabled={!!running||busy} onClick={()=>setTarget('input')}>Input</button>

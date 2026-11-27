@@ -13,15 +13,16 @@ const id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 const good: ConversionJobData = { inputKey: 'temporary/' + id + '/input.stl', outputKey: 'temporary/' + id + '/output.glb', inputFormat: 'STL', outputFormat: 'GLB', originalBytes: 134, compression: 'None', color: null, etag: '"etag"', expiresAt: 2000 }
 test('worker rejects unexpected keys, expiry, size and unimplemented options', () => {
   assert.doesNotThrow(() => checkJob(id, good, 1000))
+  assert.doesNotThrow(() => checkJob(id, {...good,originalBytes:1024**3},1000))
   for (const value of [{ ...good, inputKey: '../etc/passwd' }, { ...good, expiresAt: 999 }, { ...good, originalBytes: 0 }, { ...good, inputFormat: 'OBJ' as const }, { ...good, outputFormat: 'STL' as const }, { ...good, outputFormat: 'BVH' as const, outputKey: 'temporary/' + id + '/output.bvh' }, { ...good, color: '#000000' }]) assert.throws(() => checkJob(id, value, 1000))
 })
 test('existing input routing and compression presets', () => {
   for (const format of ['STL', 'OBJ', 'FBX', 'GLB', 'GLTF', '3MF', 'PLY', 'USD', 'USDA', 'USDC', 'USDZ', 'ABC', 'BVH', 'SVG', 'PDF'] as const) {
-    assert.doesNotThrow(() => checkJob(id, { ...good, inputFormat: format, inputKey: 'temporary/' + id + '/input.' + format.toLowerCase(), compression: 'High' }, 1000))
+    assert.doesNotThrow(() => checkJob(id, { ...good, inputFormat: format, inputKey: 'temporary/' + id + '/input.' + format.toLowerCase(), compression: 'None' }, 1000))
   }
-  assert.doesNotThrow(() => checkJob(id, { ...good, outputFormat: 'PLY', outputKey: 'temporary/' + id + '/output.ply', compression: 'High' }, 1000))
+  assert.doesNotThrow(() => checkJob(id, { ...good, inputFormat:'PLY', inputKey:'temporary/'+id+'/input.ply', outputFormat: 'PLY', outputKey: 'temporary/' + id + '/output.ply', compression: 'High' }, 1000))
   assert.throws(() => checkJob(id, { ...good, outputFormat: 'FBX', outputKey: 'temporary/' + id + '/output.fbx', compression: 'High' }, 1000))
-  for (const [level, size] of [['Low', '2048'], ['Medium', '1024'], ['High', '512']] as const) {
+  for (const [level, size] of [['Low', '2048'], ['Medium', '1024'], ['High', '1024']] as const) {
     const args = optimizationArgs(level, false, 'in.glb', 'out.glb')
     assert.equal(args[args.indexOf('--texture-size') + 1], size)
     assert.equal(args[args.indexOf('--simplify') + 1], level === 'High' ? 'true' : 'false')
@@ -49,4 +50,20 @@ test('preview job uses dedicated GLB/PNG output key and fixed compression',()=>{
   }
   assert.throws(()=>checkJob(id,{...data,outputKey:good.outputKey},1000))
   assert.throws(()=>checkJob(id,{...data,compression:'Low'},1000))
+})
+
+test('batch dependency bundle contract',()=>{
+  const bundled={...good,inputFormat:'OBJ' as const,inputKey:'temporary/'+id+'/input.zip',bundleEntry:'folder/model.obj'}
+  assert.doesNotThrow(()=>checkJob(id,bundled,1000))
+  assert.throws(()=>checkJob(id,{...bundled,bundleEntry:'../model.obj'},1000))
+  assert.throws(()=>checkJob(id,{...bundled,inputKey:'temporary/'+id+'/input.obj'},1000))
+  assert.throws(()=>checkJob(id,{...good,compression:'High'},1000))
+})
+
+test('package output key follows package operation',()=>{
+  const bundle={...good,inputFormat:'OBJ' as const,inputKey:'temporary/'+id+'/input.zip',bundleEntry:'folder/model.obj'}
+  assert.doesNotThrow(()=>checkJob(id,{...bundle,purpose:'preview'},1000))
+  const compressed={...bundle,outputFormat:'OBJ' as const,compression:'High' as const,packageOutput:true,outputKey:'temporary/'+id+'/output.zip'}
+  assert.doesNotThrow(()=>checkJob(id,compressed,1000))
+  assert.throws(()=>checkJob(id,{...compressed,outputKey:good.outputKey},1000))
 })

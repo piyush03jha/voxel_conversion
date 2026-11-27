@@ -49,3 +49,12 @@ Phase 6 UI, bounded model preview, measured queue wait estimation, and resumable
 All 15 formats have preview routes; see [all-format preview](docs/preview-all-formats.md). Server previews are optional, bounded and separate from conversion results.
 
 See [local infrastructure troubleshooting](docs/local-infra.md) for the MinIO replacement, startup checks and migration notes.
+
+See [workspace update](docs/workspace-update.md) for the separate /compress tool, format recommendations, persistent viewer and large-file worker settings.
+
+Large-upload update: [ADVFX-based multipart uploads and resource sizing](docs/large-uploads.md). No fixed application input size cap; provider, shared storage budget, disk and format constraints still apply.
+
+Batch tools: [/batch](/batch) and [/compress/batch](/compress/batch). See [batch processing](docs/batch-processing.md) for capabilities, resource limits and local tests. Conversion and compression are separate API operations; no combined format change and optional compression.
+
+Single-model folders and ZIP packages: [/package](/package), [/compress/package](/compress/package). See [model packages](docs/model-packages.md).
+STL dimensions: [millimetre unit convention and regression tests](docs/stl-units.md).

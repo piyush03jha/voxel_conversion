@@ -2,14 +2,14 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { validateUpload, tokenHash } from './conversion/validation'
 import { StorageService } from './conversion/storage.service'
-import { ACCEPTED_FORMATS, MAX_UPLOAD_BYTES } from '../../../packages/shared/src/compatibility'
+import { ACCEPTED_FORMATS } from '../../../packages/shared/src/compatibility'
 
 const good = { filename: 'model.stl', size: 100, outputFormat: 'GLB' }
-test('metadata validation defaults and maximum size', () => {
+test('metadata validation accepts large uploads and rejects invalid provider sizes', () => {
   assert.deepEqual(validateUpload(good), { inputFormat: 'STL', originalBytes: 100, outputFormat: 'GLB', compression: 'None', color: null })
-  assert.equal(validateUpload({ ...good, size: MAX_UPLOAD_BYTES, compression: 'High' }).compression, 'High')
+  assert.equal(validateUpload({ ...good, size: 1024 ** 3, outputFormat:'STL', compression: 'High' }).compression, 'High')
   assert.throws(() => validateUpload({ ...good, color: '#ABCDEF' }))
-  for (const bad of [{ size: 0 }, { size: MAX_UPLOAD_BYTES + 1 }, { size: 1.5 }, { size: '10' }, { filename: '../test.stl' }, { filename: 'test.exe' }, { outputFormat: 'BVH' }, { outputFormat: 'FBX', compression: 'High' }, { color: '#abc' }, { compression: 'Extreme' }, { inputKey: 'arbitrary' }]) assert.throws(() => validateUpload({ ...good, ...bad }))
+  for (const bad of [{ size: 0 }, { size: 6 * 1024 ** 4 }, { size: Infinity }, { size: 1.5 }, { size: '10' }, { filename: '../test.stl' }, { filename: 'test.exe' }, { outputFormat: 'BVH' }, { outputFormat: 'FBX', compression: 'High' }, { color: '#abc' }, { compression: 'Extreme' }, { inputKey: 'arbitrary' }]) assert.throws(() => validateUpload({ ...good, ...bad }))
   assert.throws(() => validateUpload(null))
 })
 test('bearer token is hashed deterministically', () => {
@@ -36,4 +36,21 @@ test('preview requests are isolated and have fixed options', () => {
   assert.throws(()=>validateUpload({...good,purpose:'preview',compression:'High'}))
   assert.throws(()=>validateUpload({...good,purpose:'preview',outputFormat:'STL'}))
   assert.throws(()=>validateUpload({...good,purpose:'unknown'}))
+})
+
+test('bundle metadata and separate operations',()=>{
+  assert.equal(validateUpload({filename:'a.obj',size:123,outputFormat:'GLB',bundleEntry:'folder/a.obj'}).bundleEntry,'folder/a.obj')
+  for(const bundleEntry of ['../a.obj','/a.obj','a.gltf','a\\a.obj'])assert.throws(()=>validateUpload({filename:'a.obj',size:123,outputFormat:'GLB',bundleEntry}))
+  assert.throws(()=>validateUpload({...good,compression:'High'}))
+  assert.throws(()=>validateUpload({filename:'a.obj',size:123,outputFormat:'OBJ',compression:'High',bundleEntry:'a.obj'}))
+})
+
+test('package conversion, preview and same-format lossless compression',()=>{
+  const source={filename:'root.gltf',size:12345,bundleEntry:'folder/root.gltf'}
+  assert.equal(validateUpload({...source,outputFormat:'GLB',purpose:'preview'}).purpose,'preview')
+  assert.equal(validateUpload({...source,outputFormat:'GLTF',compression:'Medium',packageOutput:true}).packageOutput,true)
+  assert.throws(()=>validateUpload({...source,outputFormat:'GLTF',compression:'Medium'}))
+  assert.throws(()=>validateUpload({...source,outputFormat:'GLB',compression:'High',packageOutput:true}))
+  assert.equal(validateUpload({filename:'a.fbx',size:123,outputFormat:'OBJ',packageOutput:true}).packageOutput,true)
+  assert.throws(()=>validateUpload({filename:'a.fbx',size:123,outputFormat:'GLB',packageOutput:true}))
 })

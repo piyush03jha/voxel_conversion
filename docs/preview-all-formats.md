@@ -8,3 +8,5 @@ Preview geometry is a static first/current-frame representation, at most 100,000
 
 ## Verify before deployment
 Restart API and workers together (heartbeat v4). Test each of the 15 input formats, then completed outputs, including server copy in R2/MinIO, document raster output, malformed inputs, large models, priority scheduling, cancellation, storage expiry and privacy. Test with trusted local fixtures only until production sandbox is verified. No live Blender, Docker or full build verification has been performed in the authoring environment.
+
+Workspace update: loaded previews remain visible during normal processing. See workspace-update.md.

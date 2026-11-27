@@ -35,6 +35,8 @@ class NativeTests(unittest.TestCase):
                     self.assertEqual(doc["accessors"][0]["count"], 3)
                     self.assertEqual(doc["accessors"][1]["count"], 3)
                     self.assertEqual(len(doc["meshes"]), 1)
+                    self.assertEqual(doc['nodes'][0]['scale'], [0.001]*3)
+                    self.assertAlmostEqual((doc['accessors'][0]['max'][0]-doc['accessors'][0]['min'][0])*doc['nodes'][0]['scale'][0],0.001)
 
     def test_reject_invalid(self):
         with tempfile.TemporaryDirectory() as tmp:

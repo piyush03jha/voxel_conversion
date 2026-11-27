@@ -3,6 +3,8 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import Redis from 'ioredis'
 import { Queue } from 'bullmq'
 import type { ConversionJobData, ConversionJobResult } from '../../../../packages/shared/src/jobs'
+import { bundleInputKey,packageOutputEntry } from '../../../../packages/shared/src/batch'
+import { SINGLE_PUT_THRESHOLD, multipartPlan, partBytes, PART_URL_BATCH } from '../../../../packages/shared/src/upload'
 import { getCompressionLevels } from '../../../../packages/shared/src/compatibility'
 import { QUEUE_NAME, WORKER_HEARTBEATS, isWorkerRoute } from '../../../../packages/shared/src/jobs'
 import { jobOutputKey, previewKind, PREVIEW_MAX_BYTES } from '../../../../packages/shared/src/preview'
@@ -20,19 +22,31 @@ interface Session extends UploadRequest {
   uploadUntil: number
   expiresAt: number
   cancelled?: boolean
+  batchId?: string
+  downloadName?:string
+  multipart?: { uploadId:string; partSize:number; partCount:number }
 }
 const prefix = 'formshift:{sessions}:'
 const slots = prefix + 'slots'
 const due = prefix + 'due'
+const reservedBytes = prefix + 'reserved-input-bytes'
 const sessionKey = (id: string) => prefix + 'session:' + id
+const batchKey = (id:string) => prefix+'batch:'+id
+const batchActive = (id:string) => prefix+'batch-active:'+id
 const lockKey = (id: string) => prefix + 'lock:' + id
 // All admission keys share a Redis hash tag. Never store model bytes in Redis.
 const RESERVE = `
+if ARGV[7] == '1' and redis.call('EXISTS', KEYS[5]) == 1 then return -2 end
 if redis.call('SCARD', KEYS[1]) >= tonumber(ARGV[1]) then return 0 end
 if redis.call('EXISTS', KEYS[3]) == 1 then return 0 end
+local used = 0
+for _, v in ipairs(redis.call('HVALS', KEYS[4])) do used = used + tonumber(v) end
+if used + tonumber(ARGV[5]) > tonumber(ARGV[6]) then return -1 end
+redis.call('HSET', KEYS[4], ARGV[2], ARGV[5])
 redis.call('SET', KEYS[3], ARGV[3])
 redis.call('SADD', KEYS[1], ARGV[2])
 redis.call('ZADD', KEYS[2], ARGV[4], ARGV[2])
+if ARGV[7] == '1' then redis.call('SET', KEYS[5], ARGV[2], 'EX', 86400) end
 return 1
 `
 const RATE = `
@@ -121,9 +135,58 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     try { return await action() }
     finally { await redis.eval(RELEASE_LOCK, 1, lockKey(id), token).catch(() => undefined) }
   }
-  async create(body: unknown) {
+  async createBatch(body:unknown){
+    if(!this.config.acceptJobs||!this.storage.configured)throw new ServiceUnavailableException('Server jobs disabled')
+    const operation=(body as {operation?:unknown}|null)?.operation
+    if(operation!=='conversion'&&operation!=='compression')throw new BadRequestException('Invalid batch operation')
+    const {redis}=this.ready()
+    const count=Number(await redis.eval(RATE,1,prefix+'batch-rate'))
+    if(count>this.config.createsPerMinute)throw new HttpException('Batch creation rate limit reached',429)
+    const id=randomUUID(),token=randomBytes(32).toString('hex')
+    const expiresAt=Date.now()+this.config.retentionSeconds*1000
+    await redis.set(batchKey(id),JSON.stringify({hash:tokenHash(token),operation,expiresAt}),'EX',this.config.retentionSeconds)
+    return {id,token,expiresAt}
+  }
+  async createBatchUpload(id:string,body:unknown,authorization?:string){
+    const {redis,queue}=this.ready()
+    if(!/^[0-9a-f-]{36}$/.test(id))throw new NotFoundException('Batch not found')
+    const raw=await redis.get(batchKey(id)),token=authorization?.match(/^Bearer ([a-f0-9]{64})$/)?.[1]
+    if(!raw||!token)throw new NotFoundException('Batch not found')
+    const batch=JSON.parse(raw) as {hash:string;operation:'conversion'|'compression';expiresAt:number}
+    if(!timingSafeEqual(Buffer.from(batch.hash,'hex'),Buffer.from(tokenHash(token),'hex'))||Date.now()>=batch.expiresAt)throw new NotFoundException('Batch not found')
+    if(!body||typeof body!=='object'||Array.isArray(body))throw new BadRequestException('Invalid package request')
+    const {reuseSource,...metadata}=body as Record<string,unknown>
+    const request=validateUpload(metadata)
+    if(request.purpose!=='preview'&&((batch.operation==='conversion'&&(request.compression!=='None'||request.inputFormat===request.outputFormat))||(batch.operation==='compression'&&(request.inputFormat!==request.outputFormat||request.compression==='None'))))throw new BadRequestException('Batch operation and settings do not match')
+    const active=await redis.get(batchActive(id))
+    if(active){
+      await this.lock(active,async()=>{
+        const s=await this.read(active),j=await queue.getJob(active)
+        const state=j?await j.getState():null
+        if(state==='active'||(j&&!['completed','failed'].includes(state??''))||(s&&!s.cancelled&&!j&&Date.now()<s.uploadUntil))throw new ConflictException('One server job per batch; wait for the current item')
+        await redis.eval(RELEASE_LOCK,1,batchActive(id),active)
+      })
+    }
+    if(reuseSource===undefined)return this.create(metadata,false,id)
+    if(!reuseSource||typeof reuseSource!=='object')throw new BadRequestException('Invalid reusable source')
+    const source=reuseSource as {id?:string;token?:string}
+    if(typeof source.id!=='string'||typeof source.token!=='string')throw new BadRequestException('Invalid reusable source')
+    const parent=await this.authorized(source.id,'Bearer '+source.token)
+    const previous=await queue.getJob(parent.id)
+    if(parent.batchId!==id||parent.cancelled||Date.now()+120000>=parent.expiresAt||parent.inputFormat!==request.inputFormat||parent.bundleEntry!==request.bundleEntry||parent.originalBytes!==request.originalBytes||!previous||await previous.getState()!=='completed')throw new ConflictException('Reusable source unavailable; start a fresh upload')
+    const object=await this.storage.head(parent.inputKey)
+    if(!object?.ETag||object.ETag!==previous.data.etag||object.ContentLength!==parent.originalBytes)throw new ConflictException('Stored source changed or expired')
+    const child=await this.create(metadata,true,id)
+    try{
+      const session=await this.authorized(child.id,'Bearer '+child.token)
+      await this.storage.copy(parent.inputKey,session.inputKey,object.ETag)
+      return {...child,reused:true}
+    }catch(error){await this.cancel(child.id,'Bearer '+child.token).catch(()=>undefined);throw error}
+  }
+  async create(body: unknown, internalCopy = false,batchId?:string) {
     if (!this.config.acceptJobs || !this.storage.configured) throw new ServiceUnavailableException('Job submission is disabled')
     const request = validateUpload(body)
+    if(request.bundleEntry&&!batchId&&!internalCopy)throw new BadRequestException('Dependency bundles require a batch session')
     if (!isWorkerRoute(request.inputFormat, request.outputFormat) || request.color !== null) throw new BadRequestException('Unsupported conversion pair; custom color is paused')
     if (!this.config.queueTestMode && await this.workerCount() < 1) throw new ServiceUnavailableException('No conversion worker is available')
     const { redis } = this.ready()
@@ -132,17 +195,30 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const id = randomUUID()
     const token = randomBytes(32).toString('hex')
     const now = Date.now()
+    const multipart = !internalCopy && request.originalBytes > SINGLE_PUT_THRESHOLD
+    const uploadSeconds = multipart ? this.config.multipartSeconds : this.config.uploadSeconds
     const session: Session = {
-      ...request, id, hash: tokenHash(token),
-      inputKey: 'temporary/' + id + '/input.' + request.inputFormat.toLowerCase(),
-      outputKey: jobOutputKey(id, request.inputFormat, request.outputFormat, request.purpose),
-      uploadUntil: now + this.config.uploadSeconds * 1000,
+      ...request, id, hash: tokenHash(token), ...(batchId?{batchId,downloadName:((body as {filename:string}).filename.replace(/\.[^.]+$/,'').replace(/[^\p{L}\p{N} ._-]/gu,'_').slice(0,160)||'model')+'.'+(request.purpose==='preview'?previewKind(request.inputFormat).toLowerCase():request.packageOutput?request.outputFormat.toLowerCase()+'.zip':request.outputFormat.toLowerCase())}:{}),
+      inputKey: bundleInputKey(id,request.inputFormat,request.bundleEntry),
+      outputKey: jobOutputKey(id, request.inputFormat, request.outputFormat, request.purpose,request.packageOutput),
+      uploadUntil: now + uploadSeconds * 1000,
       expiresAt: now + this.config.retentionSeconds * 1000,
     }
     // Reserve before returning a signed URL, including uploads that never submit.
-    const ok = await redis.eval(RESERVE, 3, slots, due, sessionKey(id), this.config.capacity, id, JSON.stringify(session), session.uploadUntil + 60000)
+    const ok = await redis.eval(RESERVE, 5, slots, due, sessionKey(id), reservedBytes, batchActive(batchId??id), this.config.capacity, id, JSON.stringify(session), session.uploadUntil + 60000, request.originalBytes, this.config.storageBudgetBytes,batchId?'1':'0')
+    if (Number(ok) === -2) throw new ConflictException('One server job per batch; wait for the current item')
+    if (Number(ok) === -1) throw new HttpException('Temporary storage capacity reached; try again later', HttpStatus.TOO_MANY_REQUESTS)
     if (Number(ok) !== 1) throw new HttpException('Queue capacity reached', HttpStatus.TOO_MANY_REQUESTS)
     try {
+      if(internalCopy)return {id,token,uploadExpiresAt:session.uploadUntil,expiresAt:session.expiresAt,uploadUrl:'',uploadHeaders:UPLOAD_HEADERS}
+      if(multipart){
+        const plan=multipartPlan(request.originalBytes)
+        const uploadId=await this.storage.beginMultipart(session.inputKey)
+        session.multipart={...plan,uploadId}
+        try{await redis.set(sessionKey(id),JSON.stringify(session))}
+        catch(error){await this.storage.abortMultipart(session.inputKey,uploadId).catch(()=>undefined);throw error}
+        return {id,token,uploadUrl:'',uploadHeaders:{},multipart:plan,uploadExpiresAt:session.uploadUntil,expiresAt:session.expiresAt}
+      }
       const uploadUrl = await this.storage.signUpload(session.inputKey, request.originalBytes, this.config.uploadSeconds)
       return { id, token, uploadUrl, uploadHeaders: UPLOAD_HEADERS, uploadExpiresAt: session.uploadUntil, expiresAt: session.expiresAt }
     } catch (error) {
@@ -150,6 +226,17 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       await this.markCancelled(session).catch(() => undefined)
       throw error
     }
+  }
+  async signParts(id:string,body:unknown,authorization?:string){
+    const s=await this.authorized(id,authorization)
+    if(s.cancelled||!s.multipart||Date.now()>=s.uploadUntil)throw new ConflictException('Multipart session unavailable')
+    if(!body||typeof body!=='object'||Array.isArray(body))throw new BadRequestException('Invalid part request')
+    const numbers=(body as {parts?:unknown}).parts
+    if(!Array.isArray(numbers)||numbers.length<1||numbers.length>PART_URL_BATCH||new Set(numbers).size!==numbers.length||numbers.some(n=>!Number.isSafeInteger(n)||n<1||n>s.multipart!.partCount))throw new BadRequestException('Invalid part numbers')
+    const upload=s.multipart
+    const expires=Math.min(900,Math.floor((s.uploadUntil-Date.now())/1000))
+    if(expires<1)throw new ConflictException('Upload session expired')
+    return {parts:await Promise.all(numbers.map(async part=>({part,url:await this.storage.signPart(s.inputKey,upload.uploadId,part,partBytes(s.originalBytes,upload.partSize,part),expires)})))}
   }
   private async markCancelled(s: Session) {
     const { redis } = this.ready()
@@ -164,10 +251,15 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       const existing = await queue.getJob(id)
       if (existing) return { id, status: await existing.getState() }
       if (!this.config.acceptJobs) throw new ServiceUnavailableException('Job submission is disabled')
-      if (!isWorkerRoute(s.inputFormat, s.outputFormat) || !getCompressionLevels(s.outputFormat).includes(s.compression) || s.color !== null) throw new BadRequestException('Conversion route not enabled')
+      if (!isWorkerRoute(s.inputFormat, s.outputFormat) || (!s.bundleEntry&&!getCompressionLevels(s.outputFormat).includes(s.compression)) || s.color !== null) throw new BadRequestException('Conversion route not enabled')
       if (!this.config.queueTestMode && await this.workerCount() < 1) throw new ServiceUnavailableException('No conversion worker is available')
       if (Date.now() >= s.uploadUntil) throw new ConflictException('Upload session expired')
-      const object = await this.storage.head(s.inputKey)
+      let object = await this.storage.head(s.inputKey)
+      if(!object&&s.multipart){
+        try{await this.storage.completeMultipart(s.inputKey,s.multipart.uploadId,s.originalBytes,s.multipart.partSize,s.multipart.partCount)}
+        catch(error){object=await this.storage.head(s.inputKey);if(!object)throw error}
+        object=object??await this.storage.head(s.inputKey)
+      }
       if (!object) throw new ConflictException('Upload not found; finish uploading first')
       if (object.ContentLength !== s.originalBytes || !object.ETag) {
         await this.markCancelled(s)
@@ -176,7 +268,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       // Extend cleanup deadline before publishing; retry with the same job id is idempotent.
       await redis.zadd(due, s.expiresAt, id)
       try { await queue.add('convert', {
-        purpose: s.purpose ?? 'conversion', inputKey: s.inputKey, outputKey: s.outputKey, inputFormat: s.inputFormat, outputFormat: s.outputFormat,
+        purpose: s.purpose ?? 'conversion', ...(s.bundleEntry?{bundleEntry:s.bundleEntry}:{}), ...(s.packageOutput?{packageOutput:true}:{}), inputKey: s.inputKey, outputKey: s.outputKey, inputFormat: s.inputFormat, outputFormat: s.outputFormat,
         originalBytes: s.originalBytes, compression: s.compression, color: s.color,
         etag: object.ETag, expiresAt: s.expiresAt,
       }, { jobId: id, ...(s.purpose === 'preview' ? { priority: 10 } : {}) }) } catch (error) {
@@ -224,7 +316,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const etaSeconds = position === null ? null : await this.waitingEstimate(position)
     const outputBytes = state === 'completed' && Number.isSafeInteger(job.returnvalue?.outputBytes) && job.returnvalue.outputBytes > 0 ? job.returnvalue.outputBytes : null
     const convertedBytes = state === 'completed' && Number.isSafeInteger(job.returnvalue?.convertedBytes) && job.returnvalue.convertedBytes > 0 ? job.returnvalue.convertedBytes : null
-    return { id, status: state, outputFormat: s.outputFormat, previewKind: s.purpose === 'preview' ? previewKind(s.inputFormat) : null, position, etaSeconds, convertedBytes, compressionApplied: state === 'completed' ? job.returnvalue?.compressionApplied ?? false : null, warning: state === 'completed' ? job.returnvalue?.warning ?? null : null, compressionReductionPercent: outputBytes !== null && convertedBytes !== null ? Math.round((1 - outputBytes / convertedBytes) * 10000) / 100 : null, error: state === 'failed' ? (s.purpose === 'preview' ? 'Preview failed. The model may be unsupported or too complex.' : 'Conversion failed. Check the input file, missing dependencies or model complexity.') : null, progress: typeof job.progress === 'number' ? job.progress : null, originalBytes: s.originalBytes, outputBytes, reductionPercent: outputBytes === null ? null : Math.round((1 - outputBytes / s.originalBytes) * 10000) / 100 }
+    return { id, status: state, outputFormat: s.outputFormat, previewKind: s.purpose === 'preview' ? previewKind(s.inputFormat) : null, position, etaSeconds, convertedBytes, compressionApplied: state === 'completed' ? job.returnvalue?.compressionApplied ?? false : null, warning: state === 'completed' ? job.returnvalue?.warning ?? null : null, compressionReductionPercent: outputBytes !== null && convertedBytes !== null ? Math.round((1 - outputBytes / convertedBytes) * 10000) / 100 : null, error: state === 'failed' ? (s.purpose === 'preview' ? 'Preview failed. The model may be unsupported or too complex.' : (job.failedReason === 'WORKER_DISK_CAPACITY' ? 'Not enough temporary disk space on the worker for this model.' : job.failedReason === 'JOB_DEADLINE_OR_INTERRUPTED' ? 'Processing exceeded the worker time limit or was interrupted.' : job.failedReason === 'PROCESS_RESOURCE_LIMIT' ? 'Worker process stopped at a resource limit. Try a less complex model or increase the worker budget.' : job.failedReason === 'INVALID_OR_COMPLEX_MODEL' ? 'Model could not be imported or exceeds the configured geometry limits.' : 'Conversion failed. Check the input file, missing dependencies or model complexity.')) : null, progress: typeof job.progress === 'number' ? job.progress : null, originalBytes: s.originalBytes, outputBytes, reductionPercent: outputBytes === null ? null : Math.round((1 - outputBytes / s.originalBytes) * 10000) / 100 }
   }
   async cancel(id: string, authorization?: string) {
     await this.authorized(id, authorization)
@@ -253,7 +345,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const object = await this.storage.head(parent.outputKey)
     if (!object?.ContentLength || !object.ETag) throw new NotFoundException('Output unavailable')
     // The child has its own slot, token, keys and retention. Copy in storage, never buffer bytes in the API.
-    const child = await this.create({ filename: 'output.' + parent.outputFormat.toLowerCase(), size: object.ContentLength, outputFormat: 'GLB', compression: 'None', purpose: 'preview' })
+    const child = await this.create({ filename: 'output.' + parent.outputFormat.toLowerCase(), size: object.ContentLength, outputFormat: 'GLB', compression: 'None', purpose: 'preview', ...(parent.packageOutput?{bundleEntry:packageOutputEntry(parent.outputFormat,parent.compression,parent.bundleEntry)}:{}) }, true)
     try {
       const session = await this.authorized(child.id, 'Bearer ' + child.token)
       await this.storage.copy(parent.outputKey, session.inputKey, object.ETag)
@@ -273,10 +365,11 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const output = await this.storage.head(s.outputKey)
     if (!output || !output.ContentLength) throw new NotFoundException('Output unavailable')
     if (s.purpose === 'preview' && output.ContentLength > PREVIEW_MAX_BYTES) throw new ConflictException('Preview exceeds size limit')
-    const format = s.purpose === 'preview' ? previewKind(s.inputFormat) : s.outputFormat
+    const format = s.purpose === 'preview' ? previewKind(s.inputFormat) : s.packageOutput?'ZIP':s.outputFormat
     const seconds = Math.min(this.config.downloadSeconds, Math.floor((s.expiresAt - Date.now()) / 1000))
     if (seconds < 1) throw new ConflictException('Job expired')
-    return { url: await this.storage.signDownload(s.outputKey, seconds, format, s.purpose === 'preview'), filename: (s.purpose === 'preview' ? 'preview.' : 'converted.') + format.toLowerCase(), expiresIn: seconds }
+    const filename=s.downloadName??((s.purpose === 'preview' ? 'preview.' : 'converted.') + format.toLowerCase())
+    return { url: await this.storage.signDownload(s.outputKey, seconds, format, s.purpose === 'preview',filename), filename, expiresIn: seconds }
   }
   private startSweep() {
     if (this.closing || this.sweepTask || !this.storage.configured) return
@@ -305,10 +398,11 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
           }
           if (job) await job.remove()
           if (s) {
+            if(s.multipart)await this.storage.abortMultipart(s.inputKey,s.multipart.uploadId)
             await this.storage.remove(s.inputKey)
             await this.storage.remove(s.outputKey)
           }
-          await redis.multi().del(sessionKey(id)).srem(slots, id).zrem(due, id).exec()
+          await redis.multi().del(sessionKey(id)).hdel(reservedBytes,id).srem(slots, id).zrem(due, id).exec()
         })
       } catch { /* another replica owns the lock or cleanup failed; retry next pass */ }
     }

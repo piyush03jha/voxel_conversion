@@ -1,9 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ACCEPTED_FORMATS, MAX_UPLOAD_BYTES, getFormatFromFilename, isConversionSupported, CONVERSION_AVAILABLE, getSupportedOutputs, getCompressionLevels } from '../../../packages/shared/src/compatibility'
+import { getOutputGroups, ACCEPTED_FORMATS, MAX_UPLOAD_BYTES, getFormatFromFilename, isConversionSupported, CONVERSION_AVAILABLE, getSupportedOutputs, getCompressionLevels } from '../../../packages/shared/src/compatibility'
 
 test('file names and upload limit', () => {
-  assert.equal(MAX_UPLOAD_BYTES, 200 * 1024 * 1024)
+  assert.equal(MAX_UPLOAD_BYTES, Number.POSITIVE_INFINITY)
   assert.equal(getFormatFromFilename('example.StL'), 'STL')
   for (const name of ['STL', '.stl', 'model.', 'model.exe', '']) assert.equal(getFormatFromFilename(name), null)
 })
@@ -18,4 +18,14 @@ test('188 compatible pairs; all 15 outputs represented', () => {
   assert.deepEqual(getCompressionLevels('FBX'), ['None'])
   assert.deepEqual(getCompressionLevels('STL'), ['None', 'Low', 'Medium', 'High'])
   assert.equal(CONVERSION_AVAILABLE, false)
+})
+
+test('recommended outputs are compatible, unique and separate from other outputs',()=>{
+  for(const input of ACCEPTED_FORMATS){
+    const {recommended,other}=getOutputGroups(input)
+    assert.ok(recommended.length>0)
+    assert.equal(new Set([...recommended,...other]).size,recommended.length+other.length)
+    assert.deepEqual([...recommended,...other].sort(),getSupportedOutputs(input).filter(output=>output!==input).slice().sort())
+  }
+  assert.deepEqual(getOutputGroups('3MF').recommended,['STL','OBJ','GLB','PLY'])
 })

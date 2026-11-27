@@ -10,6 +10,8 @@
   -moz-osx-font-smoothing: grayscale;
   font-optical-sizing: auto;
   font-weight: 400;
+  font-size: 16px;
+  line-height: 1.5;
 
   --surface: #151c1c;
   --surface-raised: #1a2322;
@@ -22,12 +24,12 @@
 * { box-sizing: border-box; }
 
 body {
-  min-width: 360px;
+  min-width: 320px;
   min-height: 100vh;
   margin: 0;
 }
 
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 button { color: inherit; }
 a { color: inherit; }
 ::selection { color: #101515; background: var(--accent); }

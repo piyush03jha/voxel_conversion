@@ -7,6 +7,8 @@ const encoder = new TextEncoder()
 const decoder = new TextDecoder('utf-8', { fatal: true })
 const MAX_VERTICES = LOCAL_MAX_TRIANGLES * 3
 const MAX_OUTPUT = 50 * 1024 * 1024
+// STL convention: millimetres; canonical geometry and glTF use metres.
+const STL_TO_METRES = 0.001
 const fail = (): never => { throw new Error('This model needs the server converter (unsupported content or local complexity limit).') }
 const number = (v: string) => {
   if (!v || !/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(v)) return fail()
@@ -129,7 +131,7 @@ function binaryStl(m:Mesh) {
   new Uint8Array(bytes).set(encoder.encode('Formshift binary STL'))
   d.setUint32(80,m.indices.length/3,true)
   for(let i=0;i<m.indices.length;i+=3){
-    const a=coords(m,m.indices[i],true),b=coords(m,m.indices[i+1],true),c=coords(m,m.indices[i+2],true)
+    const a=coords(m,m.indices[i],true).map(x=>x/STL_TO_METRES),b=coords(m,m.indices[i+1],true).map(x=>x/STL_TO_METRES),c=coords(m,m.indices[i+2],true).map(x=>x/STL_TO_METRES)
     const u=b.map((v,j)=>v-a[j]),v=c.map((n,j)=>n-a[j])
     const n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]]
     const length=Math.hypot(...n)
@@ -225,6 +227,7 @@ export function convertBytes(bytes:ArrayBuffer,input:ModelFormat,output:ModelFor
   if((input==='GLB'||input==='GLTF')&&(output==='GLB'||output==='GLTF'))result=repack(bytes,input,output)
   else {
     const m=input==='STL'?stl(bytes):input==='OBJ'?obj(bytes):input==='PLY'?ply(bytes):fail()
+    if(input==='STL')for(let i=0;i<m.positions.length;i++)m.positions[i]*=STL_TO_METRES
     if(output==='STL')result=binaryStl(m)
     else if(output==='OBJ')result=asciiObj(m)
     else if(output==='PLY')result=binaryPly(m)

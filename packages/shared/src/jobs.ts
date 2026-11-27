@@ -6,6 +6,8 @@ export { COMPRESSION_LEVELS } from './compatibility'
 export type { CompressionLevel } from './compatibility'
 import type { CompressionLevel } from './compatibility'
 export interface ConversionJobData {
+  bundleEntry?: string
+  packageOutput?: boolean
   purpose?: 'preview' | 'conversion'
   inputKey: string
   outputKey: string
@@ -24,7 +26,7 @@ export interface ConversionJobResult {
   warning: string | null
 }
 
-export const WORKER_HEARTBEATS = 'formshift:worker-heartbeats:v4'
+export const WORKER_HEARTBEATS = 'formshift:worker-heartbeats:v8'
 export const ACTIVE_INPUTS = ACCEPTED_FORMATS
 export function isWorkerRoute(input: string, output: string): boolean {
   return ACTIVE_INPUTS.some((format) => format === input) && ACTIVE_INPUTS.some((format) => format === output) && isConversionSupported(input as ModelFormat, output as ModelFormat)

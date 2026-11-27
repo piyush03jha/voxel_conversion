@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
-import { stat, rm } from 'node:fs/promises'
+import { mkdir, stat, rm } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import type { WorkerConfig } from './config'
 import { getOutputWarning } from '../../../packages/shared/src/compatibility'
@@ -19,6 +19,9 @@ function environment(config: WorkerConfig, dir: string) {
     OMP_NUM_THREADS: String(config.threads), OPENBLAS_NUM_THREADS: String(config.threads),
     VOXEL3D_GLTF_MAX_FACES: '0', VOXEL3D_DENSE_MAX_TRIANGLES: String(config.maxTriangles),
     VOXEL3D_DENSE_MAX_CELLS: String(config.maxCells),
+    VOXEL3D_3MF_MAX_TRIANGLES: String(config.maxTriangles),
+    VOXEL3D_3MF_MAX_XML_MB: String(config.maxArchiveMb),
+    WORKER_MAX_ARCHIVE_MB: String(config.maxArchiveMb),
     WORKER_MAX_TRIANGLES: String(config.maxTriangles),
     NODE_OPTIONS: '--max-old-space-size=' + config.optimizerHeapMb,
     PDF_TO_SVG_BIN: '/usr/bin/pdftocairo',
@@ -37,7 +40,7 @@ function sandboxCommand(config: WorkerConfig, dir: string, args: string[]): stri
     '--chdir', dir, '--', ...args]
 }
 class ConverterExit extends Error {
-  constructor(readonly code: number | null) { super('INVALID_OR_COMPLEX_MODEL') }
+  constructor(readonly code: number | null) { super(code === null ? 'PROCESS_RESOURCE_LIMIT' : 'INVALID_OR_COMPLEX_MODEL') }
 }
 async function run(config: WorkerConfig, dir: string, args: string[], signal: AbortSignal, addressMb: number | null) {
   if (process.platform !== 'linux') throw new Error('LINUX_WORKER_REQUIRED')
@@ -78,15 +81,15 @@ async function objHasMaterials(input: string, signal: AbortSignal) {
   }
   return false
 }
-export async function runConverter(config: WorkerConfig, dir: string, input: string, output: string, format: ModelFormat, signal: AbortSignal): Promise<string> {
+export async function runConverter(config: WorkerConfig, dir: string, input: string, output: string, format: ModelFormat, signal: AbortSignal,bundled=false): Promise<string> {
   const ext = '.' + format.toLowerCase()
   if (format === 'STL') await run(config, dir, [config.python, '-I', join(config.scriptsDir, 'validate-stl.py'), input], signal, config.memoryMb)
-  else await run(config, dir, [config.python, '-I', join(config.scriptsDir, 'validate-input.py'), input, ext], signal, config.memoryMb)
-  if (format === 'GLB') { await readGlbInfo(input, config.maxOutputBytes); return input }
+  else if(!bundled) await run(config, dir, [config.python, '-I', join(config.scriptsDir, 'validate-input.py'), input, ext], signal, config.memoryMb)
+  if (format === 'GLB' && !bundled) { await readGlbInfo(input, config.maxOutputBytes); return input }
   let native: string[] | null = null
   if (format === '3MF') native = ['threemf-to-glb.py']
   if (format === 'PLY' || (format === 'STL' && config.engine === 'native')) native = ['dense-mesh-to-glb.py', '--ext', ext]
-  if (format === 'OBJ' && (await stat(input)).size >= 30 * 1024 * 1024 && !await objHasMaterials(input, signal)) native = ['dense-mesh-to-glb.py', '--ext', ext]
+  if (!bundled && format === 'OBJ' && (await stat(input)).size >= 30 * 1024 * 1024 && !await objHasMaterials(input, signal)) native = ['dense-mesh-to-glb.py', '--ext', ext]
   if (native) {
     const [script, ...extra] = native
     try {
@@ -101,18 +104,18 @@ export async function runConverter(config: WorkerConfig, dir: string, input: str
   }
   await run(config, dir, [config.blender, '--background', '--factory-startup', '--disable-autoexec',
     '--threads', String(config.threads), '--python-exit-code', '1', '--python', join(config.scriptsDir, 'blender-convert.py'),
-    '--', '--input', input, '--output', output, '--ext', ext], signal, config.blenderAddressMb)
+    '--', '--input', input, '--output', output, '--ext', ext,...(bundled?['--package-root',join(dir,'assets')]:[])], signal, config.blenderAddressMb)
   return output
 }
 
 export function optimizationArgs(level: Exclude<CompressionLevel, 'None'>, animated: boolean, input: string, output: string) {
   // Reuse ADVFX optimize flags; presets differ by texture size and optional static mesh simplification.
-  const textureSize = { Low: '2048', Medium: '1024', High: '512' }[level]
+  const textureSize = { Low: '2048', Medium: '1024', High: '1024' }[level]
   const simplify = level === 'High' && !animated
   return ['optimize', input, output, '--compress', 'meshopt', '--meshopt-level', 'medium',
     '--texture-compress', 'webp', '--texture-size', textureSize,
     '--flatten', 'false', '--join', 'false', '--instance', 'false', '--palette', 'false',
-    '--simplify', String(simplify), '--simplify-ratio', simplify ? '0.3' : '0.5',
+    '--simplify', String(simplify), '--simplify-ratio', simplify ? '0.8' : '1',
     '--simplify-error', '0.001', '--simplify-lock-border', 'true']
 }
 export async function optimizeGlb(config: WorkerConfig, dir: string, input: string, level: CompressionLevel, signal: AbortSignal) {
@@ -153,16 +156,16 @@ async function verifyOther(config: WorkerConfig, dir: string, path: string, form
   }
   return info.size
 }
-export async function convertJob(config: WorkerConfig, dir: string, input: string, source: ModelFormat, target: ModelFormat, level: CompressionLevel, signal: AbortSignal) {
+export async function convertJob(config: WorkerConfig, dir: string, input: string, source: ModelFormat, target: ModelFormat, level: CompressionLevel, signal: AbortSignal, bundled=false) {
   const output = join(dir, 'output.' + target.toLowerCase())
   const warning = getOutputWarning(target)
   if (target === 'GLB') {
-    const converted = await runConverter(config, dir, input, output, source, signal)
+    const converted = await runConverter(config, dir, input, output, source, signal,bundled)
     return optimizeGlb(config, dir, converted, level, signal)
   }
   if (target === 'GLTF') {
     // Blender 4.x removed embedded glTF; use the existing GLB exporter only here.
-    const converted = await runConverter(config, dir, input, join(dir, 'intermediate.glb'), source, signal)
+    const converted = await runConverter(config, dir, input, join(dir, 'intermediate.glb'), source, signal,bundled)
     await readGlbInfo(converted, config.maxOutputBytes)
     await run(config, dir, [config.python, '-I', join(config.scriptsDir, 'embed-gltf.py'), converted, output], signal, config.memoryMb)
     const bytes = await verifyOther(config, dir, output, target, signal)
@@ -170,7 +173,7 @@ export async function convertJob(config: WorkerConfig, dir: string, input: strin
   }
   const ext = '.' + source.toLowerCase()
   if (source === 'STL') await run(config, dir, [config.python, '-I', join(config.scriptsDir, 'validate-stl.py'), input], signal, config.memoryMb)
-  else await run(config, dir, [config.python, '-I', join(config.scriptsDir, 'validate-input.py'), input, ext], signal, config.memoryMb)
+  else if(!bundled) await run(config, dir, [config.python, '-I', join(config.scriptsDir, 'validate-input.py'), input, ext], signal, config.memoryMb)
   if (target === 'PDF' || target === 'SVG') {
     if (source !== 'PDF' && source !== 'SVG') throw new Error('INVALID_VECTOR_ROUTE')
     let path = output
@@ -180,11 +183,21 @@ export async function convertJob(config: WorkerConfig, dir: string, input: strin
     const bytes = await verifyOther(config, dir, path, target, signal)
     return { path, convertedBytes: bytes, outputBytes: bytes, compressionApplied: false, warning }
   }
+  if (source === '3MF' && target === '3MF' && level !== 'None') {
+    const original=(await stat(input)).size
+    const candidate=join(dir,'repacked.3mf')
+    try {
+      await run(config,dir,[config.python,'-I',join(config.scriptsDir,'repack-3mf.py'),input,candidate,String({Low:1,Medium:6,High:9}[level])],signal,config.memoryMb)
+      const bytes=(await stat(candidate)).size
+      if(bytes>0&&bytes<original)return {path:candidate,convertedBytes:original,outputBytes:bytes,compressionApplied:true,warning:'Lossless 3MF ZIP recompression; model entries preserved.'}
+    } catch { signal.throwIfAborted() }
+    return {path:input,convertedBytes:original,outputBytes:original,compressionApplied:false,warning:'Original 3MF package retained; no smaller lossless result.'}
+  }
   // Direct import → chosen exporter: no forced GLB roundtrip for these targets.
   const candidate = join(dir, 'optimized.' + target.toLowerCase())
   const args = [config.blender, '--background', '--factory-startup', '--disable-autoexec',
     '--threads', String(config.threads), '--python-exit-code', '1', '--python', join(config.scriptsDir, 'blender-convert.py'),
-    '--', '--input', input, '--output', output, '--ext', ext, '--target', target, '--compression', level]
+    '--', '--input', input, '--output', output, '--ext', ext, '--target', target, '--compression', level,...(bundled?['--package-root',join(dir,'assets')]:[])]
   // Publish baseline before optimizing. Candidate generation happens in same scene, not a second import.
   if (level !== 'None') args.push('--candidate', candidate)
   await run(config, dir, args, signal, config.blenderAddressMb)
@@ -192,23 +205,27 @@ export async function convertJob(config: WorkerConfig, dir: string, input: strin
   if (level !== 'None' && existsSync(candidate)) {
     try {
       const candidateBytes = await verifyOther(config, dir, candidate, target, signal)
-      if (candidateBytes < bytes) return { path: candidate, convertedBytes: bytes, outputBytes: candidateBytes, compressionApplied: true, warning: [warning, target === '3MF' ? 'ZIP compression retained the mesh geometry.' : 'Static mesh simplification may reduce geometry detail.'].filter(Boolean).join(' ') }
+      if (candidateBytes < bytes && (source !== target || candidateBytes < (await stat(input)).size)) return { path: candidate, convertedBytes: source === target ? (await stat(input)).size : bytes, outputBytes: candidateBytes, compressionApplied: true, warning: [warning, target === '3MF' ? 'ZIP compression retained the mesh geometry.' : 'Static mesh simplification may reduce geometry detail.'].filter(Boolean).join(' ') }
     } catch { signal.throwIfAborted() }
     await rm(candidate, { force: true })
+  }
+  if (source === target && level !== 'None') {
+    const original=(await stat(input)).size
+    return {path:input,convertedBytes:original,outputBytes:original,compressionApplied:false,warning:'Original file retained; no smaller verified compression candidate.'}
   }
   return { path: output, convertedBytes: bytes, outputBytes: bytes, compressionApplied: false,
     warning: [warning, level !== 'None' ? 'Compression unavailable or not smaller; original export retained.' : null].filter(Boolean).join(' ') || null }
 }
 
-export async function createPreview(config: WorkerConfig, dir: string, input: string, source: ModelFormat, signal: AbortSignal) {
+export async function createPreview(config: WorkerConfig, dir: string, input: string, source: ModelFormat, signal: AbortSignal,bundled=false) {
   const kind=previewKind(source), output=join(dir,'preview.'+kind.toLowerCase()), ext='.'+source.toLowerCase()
   const deadline=AbortSignal.any([signal,AbortSignal.timeout(120000)])
   const boundedConfig={...config,maxOutputBytes:PREVIEW_MAX_BYTES}
   if(source==='STL')await run(config,dir,[config.python,'-I',join(config.scriptsDir,'validate-stl.py'),input],deadline,config.memoryMb)
-  else await run(config,dir,[config.python,'-I',join(config.scriptsDir,'validate-input.py'),input,ext],deadline,config.memoryMb)
+  else if(!bundled) await run(config,dir,[config.python,'-I',join(config.scriptsDir,'validate-input.py'),input,ext],deadline,config.memoryMb)
   if(source==='PDF')await run(boundedConfig,dir,['pdftocairo','-f','1','-l','1','-singlefile','-scale-to','1200','-png',input,join(dir,'preview')],deadline,config.memoryMb)
   else if(source==='SVG')await run(boundedConfig,dir,['rsvg-convert','-w','1200','-h','1200','--keep-aspect-ratio','-o',output,input],deadline,config.memoryMb)
-  else await run(boundedConfig,dir,[config.blender,'--background','--factory-startup','--disable-autoexec','--threads',String(config.threads),'--python-exit-code','1','--python',join(config.scriptsDir,'blender-convert.py'),'--','--input',input,'--output',output,'--ext',ext,'--preview'],deadline,config.blenderAddressMb)
+  else await run(boundedConfig,dir,[config.blender,'--background','--factory-startup','--disable-autoexec','--threads',String(config.threads),'--python-exit-code','1','--python',join(config.scriptsDir,'blender-convert.py'),'--','--input',input,'--output',output,'--ext',ext,'--preview',...(bundled?['--package-root',join(dir,'assets')]:[])],deadline,config.blenderAddressMb)
   let bytes:number
   if(kind==='GLB')bytes=(await readGlbInfo(output,PREVIEW_MAX_BYTES)).bytes
   else{
@@ -222,4 +239,31 @@ export async function createPreview(config: WorkerConfig, dir: string, input: st
   }
   deadline.throwIfAborted()
   return {path:output,outputBytes:bytes,convertedBytes:bytes,compressionApplied:false,warning:kind==='PNG'?'Raster document preview (first page for PDF).':'Approximate static geometry preview; large meshes may be sampled.'}
+}
+
+export async function unpackBundle(config:WorkerConfig,dir:string,archive:string,entry:string,signal:AbortSignal){
+  const root=join(dir,'assets')
+  await run(config,dir,[config.python,'-I',join(config.scriptsDir,'extract-bundle.py'),archive,root,entry],signal,config.memoryMb)
+  return join(root,entry)
+}
+
+export async function compressPackage(config:WorkerConfig,dir:string,uploaded:string,entry:string,level:Exclude<CompressionLevel,'None'>,signal:AbortSignal){
+  const output=join(dir,'compressed.zip'),original=(await stat(uploaded)).size
+  if(original>config.maxOutputBytes)throw new Error('INVALID_OUTPUT')
+  await run(config,dir,[config.python,'-I',join(config.scriptsDir,'package-output.py'),'repack',uploaded,output,entry,String({Low:1,Medium:6,High:9}[level])],signal,config.memoryMb)
+  const bytes=(await stat(output)).size
+  return bytes<original?{path:output,outputBytes:bytes,convertedBytes:original,compressionApplied:true,warning:'Lossless package compression; model, material and texture bytes preserved.'}:{path:uploaded,outputBytes:original,convertedBytes:original,compressionApplied:false,warning:'Original package retained; lossless compression did not reduce size.'}
+}
+export async function exportPackage(config:WorkerConfig,dir:string,input:string,source:ModelFormat,target:ModelFormat,signal:AbortSignal,bundled:boolean){
+  const root=join(dir,'export'),model=join(root,'model.'+target.toLowerCase()),output=join(dir,'output.zip')
+  await mkdir(root)
+  const ext='.'+source.toLowerCase()
+  if(source==='STL')await run(config,dir,[config.python,'-I',join(config.scriptsDir,'validate-stl.py'),input],signal,config.memoryMb)
+  else if(!bundled)await run(config,dir,[config.python,'-I',join(config.scriptsDir,'validate-input.py'),input,ext],signal,config.memoryMb)
+  await run(config,dir,[config.blender,'--background','--factory-startup','--disable-autoexec','--threads',String(config.threads),'--python-exit-code','1','--python',join(config.scriptsDir,'blender-convert.py'),'--','--input',input,'--output',model,'--ext',ext,'--target',target,'--package-output',...(bundled?['--package-root',join(dir,'assets')]:[])],signal,config.blenderAddressMb)
+  await verifyOther(config,dir,model,target,signal)
+  await run(config,dir,[config.python,'-I',join(config.scriptsDir,'package-output.py'),'pack',root,output,'model.'+target.toLowerCase(),String(config.maxOutputBytes)],signal,config.memoryMb)
+  const bytes=(await stat(output)).size
+  if(bytes<1||bytes>config.maxOutputBytes)throw new Error('INVALID_OUTPUT')
+  return {path:output,outputBytes:bytes,convertedBytes:bytes,compressionApplied:false,warning:'ZIP includes the exported model and compatible material/texture assets; format-specific shader and animation limitations remain.'}
 }
